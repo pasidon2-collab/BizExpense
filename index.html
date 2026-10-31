@@ -16,6 +16,65 @@
             window.lucide = { createIcons: function () {} };
         }
     </script>
+    <!-- Firebase SDK (Authentication + Firestore) -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyDSp9TtgmM3F26y7PvVyDHG5uWCPfBdmPQ",
+            authDomain: "bizexpense-223db.firebaseapp.com",
+            projectId: "bizexpense-223db",
+            storageBucket: "bizexpense-223db.firebasestorage.app",
+            messagingSenderId: "924453724325",
+            appId: "1:924453724325:web:228981b72a49ab9e592d4c"
+        };
+        let firebaseAuth = null;
+        let firebaseDb = null;
+        let firebaseSignupInProgress = false;
+        try {
+            if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
+            firebaseAuth = firebase.auth();
+            firebaseDb = firebase.firestore();
+        } catch (firebaseInitError) {
+            console.error("Firebase 초기화 실패:", firebaseInitError);
+        }
+
+        // 앱 로그인은 이름을 사용하고, Firebase Authentication에는 내부 이메일을 사용합니다.
+        // 최고관리자는 사용자가 생성한 실제 Firebase 이메일 주소에 연결합니다.
+        const FIREBASE_SUPERADMIN_NAME = "최고관리자";
+        const FIREBASE_SUPERADMIN_EMAIL = "pasidon0@gmail.com";
+        function firebaseEmailForName(name) {
+            const cleanName = String(name || "").trim();
+            if (cleanName === FIREBASE_SUPERADMIN_NAME) return FIREBASE_SUPERADMIN_EMAIL;
+            const bytes = new TextEncoder().encode(cleanName.toLowerCase());
+            const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, "0")).join("");
+            return "bizuser-" + hex + "@bizexpense-login.com";
+        }
+
+        async function loadFirebaseProfile(authUser) {
+            if (!firebaseDb || !authUser) throw new Error("Firebase 연결을 확인할 수 없습니다.");
+            const snap = await firebaseDb.collection("users").doc(authUser.uid).get();
+            if (!snap.exists) throw new Error("Firebase에 사용자 정보가 없습니다. 관리자에게 Firestore users 문서 등록을 요청해주세요.");
+            const profile = snap.data() || {};
+            if (profile.status !== "approved") {
+                throw new Error(profile.status === "pending"
+                    ? "가입 승인 대기 중입니다. 관리자 승인 후 로그인할 수 있습니다."
+                    : "계정 상태를 확인할 수 없습니다. 관리자에게 문의해주세요.");
+            }
+            return {
+                uid: authUser.uid,
+                name: profile.name || authUser.displayName || authUser.email,
+                email: authUser.email,
+                empNo: profile.empNo || "",
+                dept: profile.department || profile.dept || "",
+                role: profile.role || "user",
+                status: profile.status,
+                createdAt: profile.createdAt || "",
+                lastLoginAt: new Date().toISOString()
+            };
+        }
+    </script>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -2731,6 +2790,28 @@
                 updateAllDepartmentSelects();
                 syncLeaveRecordsFromClaims();
                 checkAuth();
+                if (firebaseAuth) {
+                    firebaseAuth.onAuthStateChanged(async (authUser) => {
+                        if (firebaseSignupInProgress) return;
+                        if (!authUser) {
+                            currentUser = null;
+                            checkAuth();
+                            return;
+                        }
+                        try {
+                            currentUser = await loadFirebaseProfile(authUser);
+                            checkAuth();
+                        } catch (profileError) {
+                            console.error("Firebase 사용자 정보 확인 실패:", profileError);
+                            currentUser = null;
+                            try { await firebaseAuth.signOut(); } catch (_) {}
+                            checkAuth();
+                            showToast(profileError.message || "계정 정보를 확인할 수 없습니다.");
+                        }
+                    });
+                } else {
+                    showToast("Firebase SDK를 불러오지 못했습니다. 인터넷 연결을 확인해주세요.");
+                }
                 showNoticePopupIfNeeded();
                 initKakaoMapSdk();
                 lucide.createIcons();
@@ -2783,8 +2864,9 @@
                 noticesData = storedNotices ? JSON.parse(storedNotices) : [];
                 if (!Array.isArray(noticesData)) noticesData = [];
 
-                const storedSession = localStorage.getItem('biz_session');
-                currentUser = storedSession ? JSON.parse(storedSession) : null;
+                // 로그인 상태는 Firebase Authentication에서만 복원합니다.
+                currentUser = null;
+                localStorage.removeItem('biz_session');
             } catch (e) {
                 registeredUsers = DEFAULT_USERS;
                 companyDepartments = DEFAULT_DEPARTMENTS;
@@ -2926,52 +3008,46 @@
                 showToast('이름과 비밀번호를 모두 입력해주세요.');
                 return;
             }
-            const user = registeredUsers.find(u => u.name === name);
-            if (!user) {
-                showToast('등록된 이름이 아닙니다. 회원가입을 먼저 진행해주세요.');
-                if (currentLoginType === 'user') {
-                    toggleAuthMode('signup');
-                    document.getElementById('signup-name').value = name;
-                }
+            if (!firebaseAuth || !firebaseDb) {
+                showToast('Firebase 연결에 실패했습니다. 인터넷 연결과 Firebase 설정을 확인해주세요.');
                 return;
             }
-            if (currentLoginType === 'admin' && !['admin', 'super_admin'].includes(user.role)) {
-                showToast('관리자 권한이 등록된 계정이 아닙니다.');
-                return;
-            }
-            if (currentLoginType === 'user' && user.role !== 'user') {
-                showToast('관리자 계정은 관리자 로그인 탭을 이용해주세요.');
-                return;
-            }
-            if (user.status === 'pending') {
-                showToast('가입 승인 대기 중입니다. 관리자 승인 후 로그인할 수 있습니다.');
-                return;
-            }
-            let valid = false;
             try {
-                const inputHash = await hashUserPassword(password);
-                if (user.passwordHash) valid = inputHash === user.passwordHash;
-                else if (user.role === 'admin' || user.role === 'super_admin') {
-                    // 기존 관리자 계정은 이전 관리자 암호로 1회 로그인 후 개인 암호로 전환 가능
-                    valid = password === getStoredAdminPassword();
-                    if (valid) user.passwordHash = inputHash;
+                const email = firebaseEmailForName(name);
+                const credential = await firebaseAuth.signInWithEmailAndPassword(email, password);
+                const profile = await loadFirebaseProfile(credential.user);
+
+                if (currentLoginType === 'admin' && !['admin', 'super_admin'].includes(profile.role)) {
+                    await firebaseAuth.signOut();
+                    showToast('관리자 권한이 등록된 계정이 아닙니다.');
+                    return;
                 }
+                if (currentLoginType === 'user' && profile.role !== 'user') {
+                    await firebaseAuth.signOut();
+                    showToast('관리자 계정은 관리자 로그인 탭을 이용해주세요.');
+                    return;
+                }
+
+                currentUser = profile;
+                localStorage.setItem('biz_session', JSON.stringify({
+                    uid: profile.uid, name: profile.name, empNo: profile.empNo,
+                    dept: profile.dept, role: profile.role, status: profile.status
+                }));
+                checkAuth();
+                const roleLabel = profile.role === 'super_admin' ? '최고관리자' : profile.role === 'admin' ? '관리자' : '직원';
+                showToast(`${roleLabel} ${profile.name} 님, 로그인되었습니다.`);
+                showNoticePopupIfNeeded();
             } catch (err) {
-                showToast(err.message || '비밀번호 확인 중 오류가 발생했습니다.');
-                return;
+                console.error("Firebase 로그인 실패:", err);
+                const code = err && err.code;
+                if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
+                    showToast('이름 또는 비밀번호가 올바르지 않습니다.');
+                } else if (code === 'auth/too-many-requests') {
+                    showToast('로그인 시도가 많습니다. 잠시 후 다시 시도해주세요.');
+                } else {
+                    showToast(err.message || 'Firebase 로그인에 실패했습니다.');
+                }
             }
-            if (!valid) {
-                showToast('비밀번호가 일치하지 않습니다. 관리자에게 초기화를 요청해주세요.');
-                return;
-            }
-            user.lastLoginAt = new Date().toISOString();
-            saveToLocalStorage();
-            currentUser = user;
-            localStorage.setItem('biz_session', JSON.stringify(currentUser));
-            checkAuth();
-            const roleLabel = user.role === 'super_admin' ? '최고관리자' : user.role === 'admin' ? '관리자' : '직원';
-            showToast(`${roleLabel} ${user.name} 님, 로그인되었습니다.`);
-            showNoticePopupIfNeeded();
         }
 
         async function handleSignup(e) {
@@ -2980,35 +3056,69 @@
             const dept = document.getElementById('signup-dept').value;
             const password = document.getElementById('signup-password').value;
             const confirmPassword = document.getElementById('signup-password-confirm').value;
-            if (password.length < 4) {
-                showToast('비밀번호는 4자리 이상 입력해주세요.');
+            if (!name) {
+                showToast('이름을 입력해주세요.');
+                return;
+            }
+            if (name === FIREBASE_SUPERADMIN_NAME) {
+                showToast('해당 이름은 사용할 수 없습니다. 관리자에게 문의해주세요.');
+                return;
+            }
+            if (password.length < 6) {
+                showToast('Firebase 비밀번호는 6자리 이상 입력해주세요.');
                 return;
             }
             if (password !== confirmPassword) {
                 showToast('비밀번호와 비밀번호 확인이 일치하지 않습니다.');
                 return;
             }
-            if (registeredUsers.some(u => u.name === name)) {
-                showToast('이미 등록된 이름입니다. 관리자에게 문의해주세요.');
+            if (!firebaseAuth || !firebaseDb) {
+                showToast('Firebase 연결에 실패했습니다. 인터넷 연결과 Firebase 설정을 확인해주세요.');
                 return;
             }
+            let createdCredential = null;
+            firebaseSignupInProgress = true;
             try {
-                const passwordHash = await hashUserPassword(password);
-                const newUser = { name, empNo: '', dept, passwordHash, role: 'user', status: 'pending', createdAt: new Date().toISOString(), lastLoginAt: '' };
-                registeredUsers.push(newUser);
-                saveToLocalStorage();
+                const email = firebaseEmailForName(name);
+                createdCredential = await firebaseAuth.createUserWithEmailAndPassword(email, password);
+                await firebaseDb.collection('users').doc(createdCredential.user.uid).set({
+                    name: name,
+                    department: dept,
+                    empNo: '',
+                    role: 'user',
+                    status: 'pending',
+                    createdAt: new Date().toISOString(),
+                    lastLoginAt: ''
+                });
+                firebaseSignupInProgress = false;
+                await firebaseAuth.signOut();
                 showToast('가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.');
                 toggleAuthMode('login');
                 document.getElementById('login-name').value = name;
                 document.getElementById('login-password').value = '';
             } catch (err) {
-                showToast(err.message || '회원가입 중 오류가 발생했습니다.');
+                firebaseSignupInProgress = false;
+                console.error("Firebase 회원가입 실패:", err);
+                if (createdCredential && createdCredential.user) {
+                    try { await createdCredential.user.delete(); } catch (_) {}
+                }
+                if (err.code === 'auth/email-already-in-use') {
+                    showToast('이미 등록된 이름입니다. 관리자에게 문의해주세요.');
+                } else if (err.code === 'auth/weak-password') {
+                    showToast('비밀번호는 6자리 이상으로 설정해주세요.');
+                } else {
+                    showToast(err.message || '회원가입에 실패했습니다. Firestore 보안 규칙을 확인해주세요.');
+                }
             }
         }
 
-        function handleLogout() {
+        async function handleLogout() {
             currentUser = null;
             localStorage.removeItem('biz_session');
+            if (firebaseAuth) {
+                try { await firebaseAuth.signOut(); }
+                catch (err) { console.error("Firebase 로그아웃 실패:", err); }
+            }
             checkAuth();
         }
 
