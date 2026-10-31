@@ -947,22 +947,29 @@
             <!-- TAB 5: 관리자 대시보드 -->
             <section id="tab-admin-dashboard" class="tab-content hidden space-y-6">
                 <!-- 상단 헤더 & 백업/복원 -->
-                <div class="bg-slate-900 text-white p-6 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                    <div>
-                        <h2 class="text-xl font-bold flex items-center space-x-2">
-                            <i data-lucide="shield-check" class="w-6 h-6 text-purple-400"></i>
-                            <span>관리자 전용 대시보드</span>
-                        </h2>
+                <div class="bg-slate-900 text-white p-5 sm:p-6 rounded-xl shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div class="min-w-0">
+                        <div class="flex flex-wrap items-center gap-3">
+                            <h2 class="text-xl font-bold flex items-center space-x-2">
+                                <i data-lucide="shield-check" class="w-6 h-6 text-purple-400"></i>
+                                <span>관리자 전용 대시보드</span>
+                            </h2>
+                            <button type="button" onclick="toggleAdminNotificationPanel()" class="relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-amber-400/50 bg-amber-500/15 hover:bg-amber-500/25 text-amber-200 text-xs font-bold transition">
+                                <i data-lucide="bell-ring" class="w-4 h-4"></i>
+                                <span>신규 접수 알림</span>
+                                <span id="admin-new-claim-header-badge" class="min-w-[22px] px-1.5 py-0.5 rounded-full bg-amber-500 text-white text-[10px]">0</span>
+                                <span id="admin-notif-header-ping" class="hidden absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-pulse"></span>
+                            </button>
+                        </div>
                         <p class="text-xs text-slate-400 mt-1">경영 분석 지표, 회원 권한 관리, 부서 관리 및 대체휴무 부채 현황을 총괄 관리합니다.</p>
                     </div>
-                    <div class="flex items-center space-x-2 flex-wrap gap-y-2">
-                        <button onclick="exportBackupDataJSON()" class="px-3.5 py-2 text-xs bg-purple-600 hover:bg-purple-500 text-white font-medium rounded-lg flex items-center space-x-1.5 shadow transition">
-                            <i data-lucide="download" class="w-4 h-4"></i>
-                            <span>전체 데이터 백업 (JSON)</span>
+                    <div class="w-full md:w-52 shrink-0 rounded-lg border border-slate-700 bg-slate-800/80 p-2 flex flex-col gap-2">
+                        <div class="text-[10px] font-semibold tracking-wide text-slate-400 px-1">전체 데이터 관리</div>
+                        <button onclick="exportBackupDataJSON()" class="w-full px-3 py-2 text-xs bg-purple-600 hover:bg-purple-500 text-white font-semibold rounded-md flex items-center justify-center gap-2 shadow transition">
+                            <i data-lucide="download" class="w-4 h-4"></i><span>전체 데이터 백업 (JSON)</span>
                         </button>
-                        <label class="px-3.5 py-2 text-xs bg-slate-700 hover:bg-slate-600 text-white font-medium rounded-lg flex items-center space-x-1.5 cursor-pointer transition">
-                            <i data-lucide="upload" class="w-4 h-4 text-emerald-400"></i>
-                            <span>데이터 복원 (JSON)</span>
+                        <label class="w-full px-3 py-2 text-xs bg-slate-700 hover:bg-slate-600 text-white font-semibold rounded-md flex items-center justify-center gap-2 cursor-pointer transition">
+                            <i data-lucide="upload" class="w-4 h-4 text-emerald-400"></i><span>데이터 복원 (JSON)</span>
                             <input type="file" id="backup-file-input" accept=".json" onchange="importBackupDataJSON(event)" class="hidden">
                         </label>
                     </div>
@@ -1008,7 +1015,7 @@
                 </div>
 
                 <!-- 신규 출장 정산 접수 알림 패널 (상단 고정) -->
-                <div class="bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-white rounded-xl border border-amber-200/90 p-3 sm:p-3.5 shadow-sm space-y-2">
+                <div id="admin-notification-panel" class="hidden bg-gradient-to-br from-amber-50/90 via-orange-50/40 to-white rounded-xl border border-amber-200/90 p-3 sm:p-3.5 shadow-sm space-y-2">
                     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 border-b border-amber-200/60 pb-2">
                         <div class="flex items-center space-x-2">
                             <div class="relative">
@@ -1242,18 +1249,46 @@
                             <div id="dept-chips-container" class="flex flex-wrap gap-2 pt-2 border-t border-slate-200"></div>
                         </div>
 
-                        <!-- 부서별 필터 탭 -->
-                        <div id="admin-user-dept-tabs" class="flex items-center space-x-1.5 overflow-x-auto pb-1 border-b border-slate-100"></div>
+                        <!-- 회원 현황 요약 카드 -->
+                        <div class="grid grid-cols-2 xl:grid-cols-4 gap-3" id="admin-user-summary-cards">
+                            <button type="button" onclick="switchAdminUserView('pending')" class="text-left rounded-xl border border-amber-200 bg-amber-50 p-4 hover:shadow-sm transition">
+                                <div class="text-xs font-semibold text-amber-700">승인 대기</div><div class="mt-1 text-2xl font-extrabold text-amber-800"><span id="admin-user-pending-count">0</span><span class="ml-1 text-sm font-semibold">명</span></div><div class="mt-1 text-[11px] text-amber-700">확인이 필요한 가입 신청</div>
+                            </button>
+                            <button type="button" onclick="switchAdminUserView('all')" class="text-left rounded-xl border border-emerald-200 bg-emerald-50 p-4 hover:shadow-sm transition">
+                                <div class="text-xs font-semibold text-emerald-700">정상 회원</div><div class="mt-1 text-2xl font-extrabold text-emerald-800"><span id="admin-user-approved-count">0</span><span class="ml-1 text-sm font-semibold">명</span></div><div class="mt-1 text-[11px] text-emerald-700">승인 완료 계정</div>
+                            </button>
+                            <button type="button" onclick="switchAdminUserView('all','admins')" class="text-left rounded-xl border border-violet-200 bg-violet-50 p-4 hover:shadow-sm transition">
+                                <div class="text-xs font-semibold text-violet-700">관리자 계정</div><div class="mt-1 text-2xl font-extrabold text-violet-800"><span id="admin-user-admin-count">0</span><span class="ml-1 text-sm font-semibold">명</span></div><div class="mt-1 text-[11px] text-violet-700">관리자 및 최고관리자</div>
+                            </button>
+                            <button type="button" onclick="switchAdminUserView('all')" class="text-left rounded-xl border border-slate-200 bg-slate-50 p-4 hover:shadow-sm transition">
+                                <div class="text-xs font-semibold text-slate-600">총 회원수</div><div class="mt-1 text-2xl font-extrabold text-slate-800"><span id="admin-user-total-count">0</span><span class="ml-1 text-sm font-semibold">명</span></div><div class="mt-1 text-[11px] text-slate-500">등록된 전체 계정</div>
+                            </button>
+                        </div>
 
-                        <div class="overflow-x-auto min-h-[320px]">
+                        <!-- 승인 대기 / 전체 회원 탭 -->
+                        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200">
+                            <div class="flex items-center gap-1" role="tablist" aria-label="회원 상태별 보기">
+                                <button id="admin-user-tab-pending" type="button" onclick="switchAdminUserView('pending')" class="px-4 py-2.5 text-xs font-bold border-b-2 border-purple-600 text-purple-700">승인 대기 (<span id="admin-user-pending-tab-count">0</span>건)</button>
+                                <button id="admin-user-tab-all" type="button" onclick="switchAdminUserView('all')" class="px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800">전체 회원 목록</button>
+                            </div>
+                            <div id="admin-user-search-wrap" class="flex items-center gap-2 pb-2">
+                                <input id="admin-user-search" type="search" oninput="renderAdminUsersTable()" placeholder="이름 또는 사번 검색" class="w-48 px-3 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500">
+                            </div>
+                        </div>
+
+                        <!-- 부서별 필터 (전체 회원 탭에서 표시) -->
+                        <div id="admin-user-dept-tabs" class="hidden flex items-center space-x-1.5 overflow-x-auto pb-1"></div>
+
+                        <div class="overflow-x-auto min-h-[260px]">
                             <table class="w-full text-xs text-left">
                                 <thead class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 sticky top-0">
                                     <tr>
-                                        <th class="py-2.5 px-3">성명 / 사번</th>
-                                        <th class="py-2.5 px-3">소속부서</th>
-                                        <th class="py-2.5 px-2 text-center">승인 상태</th>
-                                        <th class="py-2.5 px-2 text-center">시스템 권한</th>
-                                        <th class="py-2.5 px-2 text-center">관리 동작</th>
+                                        <th class="py-3 px-3">사번 / 성명</th>
+                                        <th class="py-3 px-3">소속 부서</th>
+                                        <th class="py-3 px-2 text-center">승인 상태</th>
+                                        <th class="py-3 px-2 text-center">시스템 권한</th>
+                                        <th class="py-3 px-3">가입일 / 최근 접속</th>
+                                        <th class="py-3 px-3 text-center">관리 동작</th>
                                     </tr>
                                 </thead>
                                 <tbody id="admin-users-tbody" class="divide-y divide-slate-100"></tbody>
@@ -2115,6 +2150,8 @@
         let currentAdminMainTab = 'analytics';
         let currentAdminSubTab = 'earned';
         let currentAdminUserDeptFilter = 'ALL';
+        let currentAdminUserView = 'pending';
+        let currentAdminUserRoleFilter = 'all';
         let pendingDeleteUserName = null;
 
         let currentEarnedPage = 1;
@@ -2678,6 +2715,15 @@
             return nameString.split(/[,/\s]+/).map(s => s.trim()).filter(Boolean);
         }
 
+        // 직원은 본인이 출장자에 포함된 정산서만 확인하고, 관리자 권한은 전체 내역을 확인합니다.
+        function getClaimsVisibleToCurrentUser() {
+            if (!currentUser) return [];
+            if (['admin', 'super_admin'].includes(currentUser.role)) return claimsData;
+            const userName = String(currentUser.name || '').trim();
+            if (!userName) return [];
+            return claimsData.filter(claim => parseTravelerList(String(claim.empName || '')).includes(userName));
+        }
+
         window.onload = function() {
             try {
                 loadLocalStorage();
@@ -2825,30 +2871,33 @@
             const superKakaoPanel = document.getElementById('super-admin-kakao-panel');
             const superPwdPanel = document.getElementById('super-admin-pwd-panel');
             const isAdmin = !!currentUser && ['admin', 'super_admin'].includes(currentUser.role);
+            const isSuperAdmin = !!currentUser && currentUser.role === 'super_admin';
+            const compactAdmin = isAdmin && !isSuperAdmin;
             const setVisible = (el, visible) => {
                 if (!el) return;
                 el.classList.toggle('hidden', !visible);
                 el.style.display = visible ? 'flex' : 'none';
             };
 
-            // 관리자는 사이드바 없이 대시보드를 전체 너비로 표시
+            // 일반 관리자는 대시보드 전체 너비로 표시하고, 최고관리자는 전체 메뉴 사이드바를 표시
             if (sidebar) {
-                sidebar.classList.toggle('hidden', isAdmin);
-                sidebar.style.display = isAdmin ? 'none' : '';
+                sidebar.classList.toggle('hidden', compactAdmin);
+                sidebar.style.display = compactAdmin ? 'none' : '';
             }
             if (layout) {
-                layout.classList.toggle('max-w-6xl', isAdmin);
-                layout.classList.toggle('max-w-7xl', !isAdmin);
-                layout.classList.toggle('md:flex-col', isAdmin);
-                layout.classList.toggle('md:flex-row', !isAdmin);
-                layout.classList.toggle('gap-0', isAdmin);
-                layout.classList.toggle('gap-4', !isAdmin);
+                layout.classList.toggle('max-w-6xl', compactAdmin);
+                layout.classList.toggle('max-w-7xl', !compactAdmin);
+                layout.classList.toggle('md:flex-col', compactAdmin);
+                layout.classList.toggle('md:flex-row', !compactAdmin);
+                layout.classList.toggle('gap-0', compactAdmin);
+                layout.classList.toggle('gap-4', !compactAdmin);
             }
 
-            setVisible(btnNew, !!currentUser && !isAdmin);
-            setVisible(btnList, !!currentUser && !isAdmin);
-            setVisible(btnMap, !!currentUser && !isAdmin);
-            setVisible(btnLeave, !!currentUser && !isAdmin);
+            const showEmployeeMenus = !!currentUser && (!isAdmin || isSuperAdmin);
+            setVisible(btnNew, showEmployeeMenus);
+            setVisible(btnList, showEmployeeMenus);
+            setVisible(btnMap, showEmployeeMenus);
+            setVisible(btnLeave, showEmployeeMenus);
             setVisible(btnAdmin, isAdmin);
 
             if (superKakaoPanel) superKakaoPanel.classList.toggle('hidden', !currentUser || currentUser.role !== 'super_admin');
@@ -2915,6 +2964,7 @@
                 showToast('비밀번호가 일치하지 않습니다. 관리자에게 초기화를 요청해주세요.');
                 return;
             }
+            user.lastLoginAt = new Date().toISOString();
             saveToLocalStorage();
             currentUser = user;
             localStorage.setItem('biz_session', JSON.stringify(currentUser));
@@ -2944,7 +2994,7 @@
             }
             try {
                 const passwordHash = await hashUserPassword(password);
-                const newUser = { name, empNo: '', dept, passwordHash, role: 'user', status: 'pending' };
+                const newUser = { name, empNo: '', dept, passwordHash, role: 'user', status: 'pending', createdAt: new Date().toISOString(), lastLoginAt: '' };
                 registeredUsers.push(newUser);
                 saveToLocalStorage();
                 showToast('가입 신청이 완료되었습니다. 관리자 승인 후 로그인할 수 있습니다.');
@@ -2994,9 +3044,10 @@
         function switchTab(tabId) {
             const role = currentUser ? currentUser.role : 'user';
             const isAdmin = ['admin', 'super_admin'].includes(role);
+            const isSuperAdmin = role === 'super_admin';
 
-            // 관리자/최고관리자는 일반 직원 메뉴에 직접 접근할 수 없고 대시보드만 사용
-            if (isAdmin && tabId !== 'admin-dashboard') {
+            // 일반 관리자는 대시보드만 이용하고, 최고관리자는 모든 메뉴에 접근 가능
+            if (isAdmin && !isSuperAdmin && tabId !== 'admin-dashboard') {
                 showToast('관리자 계정은 관리자 대시보드만 이용할 수 있습니다.');
                 tabId = 'admin-dashboard';
             } else if (tabId === 'admin-dashboard' && !isAdmin) {
@@ -4185,10 +4236,13 @@
             const deptFilter = document.getElementById('filter-dept') ? document.getElementById('filter-dept').value : 'ALL';
             const searchKeyword = document.getElementById('filter-search') ? document.getElementById('filter-search').value.trim().toLowerCase() : '';
 
-            // 카운트 뱃지 갱신
-            const totalCount = claimsData.length;
-            const domesticCount = claimsData.filter(c => c.tripType !== 'overseas').length;
-            const overseasCount = claimsData.filter(c => c.tripType === 'overseas').length;
+            // 직원에게는 본인이 작성/참여한 정산서만 노출하고 관리자는 전체 내역을 확인합니다.
+            const visibleClaims = getClaimsVisibleToCurrentUser();
+
+            // 카운트 뱃지도 현재 사용자에게 노출되는 내역 기준으로 계산
+            const totalCount = visibleClaims.length;
+            const domesticCount = visibleClaims.filter(c => c.tripType !== 'overseas').length;
+            const overseasCount = visibleClaims.filter(c => c.tripType === 'overseas').length;
 
             const badgeAll = document.getElementById('claims-count-all');
             const badgeDomestic = document.getElementById('claims-count-domestic');
@@ -4197,7 +4251,7 @@
             if (badgeDomestic) badgeDomestic.textContent = domesticCount;
             if (badgeOverseas) badgeOverseas.textContent = overseasCount;
 
-            const filtered = claimsData.filter(c => {
+            const filtered = visibleClaims.filter(c => {
                 // 국내/해외 탭 필터링
                 if (currentClaimsTripTypeFilter === 'domestic' && c.tripType === 'overseas') return false;
                 if (currentClaimsTripTypeFilter === 'overseas' && c.tripType !== 'overseas') return false;
@@ -4294,6 +4348,11 @@
             currentModalItemsPage = 1; // 첫 페이지로 초기화
             const claim = claimsData.find(c => String(c.id) === String(claimId) || (c.uid && String(c.uid) === String(claimId)));
             if (!claim) return;
+            // 화면 필터 우회로 타인의 정산서 상세를 여는 것도 차단합니다.
+            if (!getClaimsVisibleToCurrentUser().some(c => c === claim)) {
+                showToast('본인이 작성하거나 출장자로 등록된 정산서만 확인할 수 있습니다.');
+                return;
+            }
 
             document.getElementById('modal-title').textContent = `세부지출내역서 [${claim.id}]`;
             document.getElementById('modal-dept').textContent = claim.empDept || '생산부';
@@ -4979,7 +5038,7 @@
             if (notice) notice.classList.add('hidden');
 
             const regionStats = {};
-            claimsData.forEach(c => {
+            getClaimsVisibleToCurrentUser().forEach(c => {
                 const loc = c.location || '';
                 let matchedRegion = null;
                 for (const regionName of Object.keys(KOREA_REGION_COORDS)) {
@@ -5094,7 +5153,7 @@
             }
 
             if (recentEl) {
-                const sortedClaims = [...claimsData].sort((a, b) => (b.submittedDate || '').localeCompare(a.submittedDate || '')).slice(0, 5);
+                const sortedClaims = [...getClaimsVisibleToCurrentUser()].sort((a, b) => (b.submittedDate || '').localeCompare(a.submittedDate || '')).slice(0, 5);
                 if (badgeEl) badgeEl.textContent = `최근 ${sortedClaims.length}건`;
 
                 if (sortedClaims.length === 0) {
@@ -5670,8 +5729,7 @@
                 renderCompanyLeaveLiabilityTable();
                 switchAdminSubTab(currentAdminSubTab);
             } else if (tabKey === 'users') {
-                renderAdminUserDeptTabs();
-                renderAdminUsersTable();
+                switchAdminUserView(currentAdminUserView || 'pending');
             } else if (tabKey === 'claims') {
                 renderAdminUserClaims();
             } else if (tabKey === 'notices') {
@@ -5733,57 +5791,94 @@
             }
         }
 
+        function switchAdminUserView(view, roleFilter = 'all') {
+            currentAdminUserView = view === 'pending' ? 'pending' : 'all';
+            currentAdminUserRoleFilter = roleFilter;
+            const pendingTab = document.getElementById('admin-user-tab-pending');
+            const allTab = document.getElementById('admin-user-tab-all');
+            const deptTabs = document.getElementById('admin-user-dept-tabs');
+            const searchWrap = document.getElementById('admin-user-search-wrap');
+            const pendingActive = 'px-4 py-2.5 text-xs font-bold border-b-2 border-purple-600 text-purple-700';
+            const inactive = 'px-4 py-2.5 text-xs font-bold border-b-2 border-transparent text-slate-500 hover:text-slate-800';
+            if (pendingTab) pendingTab.className = currentAdminUserView === 'pending' ? pendingActive : inactive;
+            if (allTab) allTab.className = currentAdminUserView === 'all' ? pendingActive : inactive;
+            if (deptTabs) deptTabs.classList.toggle('hidden', currentAdminUserView !== 'all');
+            if (searchWrap) searchWrap.classList.toggle('hidden', currentAdminUserView !== 'all');
+            if (currentAdminUserView === 'all') renderAdminUserDeptTabs();
+            renderAdminUsersTable();
+        }
+
+        function rejectUser(userName) {
+            if (!confirm(`${userName}님의 가입 신청을 반려하시겠습니까?\n반려하면 해당 가입 신청 계정이 삭제됩니다.`)) return;
+            const idx = registeredUsers.findIndex(u => u.name === userName && u.status === 'pending');
+            if (idx < 0) return;
+            registeredUsers.splice(idx, 1);
+            saveToLocalStorage();
+            showToast(`${userName}님의 가입 신청이 반려되었습니다.`);
+            renderAdminUserDeptTabs();
+            renderAdminUsersTable();
+        }
+
         function renderAdminUsersTable() {
             const tbody = document.getElementById('admin-users-tbody');
             if (!tbody) return;
             tbody.innerHTML = '';
 
-            const userCount = document.getElementById('admin-user-count');
-            if (userCount) userCount.textContent = registeredUsers.length;
+            const pendingUsers = registeredUsers.filter(u => u.status === 'pending');
+            const approvedUsers = registeredUsers.filter(u => u.status === 'approved');
+            const adminUsers = registeredUsers.filter(u => ['admin', 'super_admin'].includes(u.role));
+            const setText = (id, value) => { const el = document.getElementById(id); if (el) el.textContent = value; };
+            setText('admin-user-count', registeredUsers.length);
+            setText('admin-user-pending-count', pendingUsers.length);
+            setText('admin-user-pending-tab-count', pendingUsers.length);
+            setText('admin-user-approved-count', approvedUsers.length);
+            setText('admin-user-admin-count', adminUsers.length);
+            setText('admin-user-total-count', registeredUsers.length);
 
-            const filteredUsers = registeredUsers.filter(u => {
-                if (currentAdminUserDeptFilter === 'ALL') return true;
-                return u.dept === currentAdminUserDeptFilter;
-            });
+            let filteredUsers = registeredUsers.filter(u => currentAdminUserView === 'pending' ? u.status === 'pending' : u.status !== 'pending');
+            if (currentAdminUserView === 'all') {
+                if (currentAdminUserDeptFilter !== 'ALL') filteredUsers = filteredUsers.filter(u => u.dept === currentAdminUserDeptFilter);
+                if (currentAdminUserRoleFilter === 'admins') filteredUsers = filteredUsers.filter(u => ['admin', 'super_admin'].includes(u.role));
+                const search = (document.getElementById('admin-user-search')?.value || '').trim().toLowerCase();
+                if (search) filteredUsers = filteredUsers.filter(u => String(u.name || '').toLowerCase().includes(search) || String(u.empNo || '').toLowerCase().includes(search));
+                const roleOrder = { super_admin: 0, admin: 1, user: 2 };
+                filteredUsers.sort((a, b) => (roleOrder[a.role] ?? 3) - (roleOrder[b.role] ?? 3) || String(a.name || '').localeCompare(String(b.name || ''), 'ko'));
+            } else {
+                filteredUsers.sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+            }
+
+            const esc = value => String(value ?? '-').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+            if (!filteredUsers.length) {
+                const message = currentAdminUserView === 'pending' ? '승인 대기 중인 가입 신청이 없습니다.' : '조건에 맞는 회원이 없습니다.';
+                tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-slate-400">${message}</td></tr>`;
+                return;
+            }
 
             filteredUsers.forEach(u => {
                 const tr = document.createElement('tr');
                 tr.className = 'hover:bg-slate-50 border-b border-slate-100';
-
-                const statusBadge = u.status === 'approved' 
-                    ? '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-100 text-emerald-800">승인완료</span>'
-                    : '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-800">승인대기</span>';
-
-                let roleBadge = '<span class="text-slate-500 font-mono text-[11px]">일반</span>';
-                if (u.role === 'super_admin') roleBadge = '<span class="text-purple-700 font-bold text-[11px]">최고관리자</span>';
-                else if (u.role === 'admin') roleBadge = '<span class="text-blue-700 font-bold text-[11px]">관리자</span>';
-
-                const approveBtn = u.status === 'pending'
-                    ? `<button onclick="approveUser('${u.name}')" class="px-2 py-0.5 text-[11px] bg-emerald-600 text-white font-semibold rounded hover:bg-emerald-500 shadow-xs mr-1">승인</button>`
-                    : '';
-
+                const initials = esc((u.name || '?').trim().charAt(0));
+                const statusBadge = u.status === 'approved'
+                    ? '<span class="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">승인 완료</span>'
+                    : '<span class="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 animate-pulse">승인 대기</span>';
+                let roleBadge = '<span class="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-100 text-slate-700">일반</span>';
+                if (u.role === 'super_admin') roleBadge = '<span class="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-violet-100 text-violet-800">최고관리자</span>';
+                else if (u.role === 'admin') roleBadge = '<span class="inline-flex px-2.5 py-1 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800">관리자</span>';
+                const created = u.createdAt ? new Date(u.createdAt).toLocaleDateString('ko-KR') : '-';
+                const lastLogin = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ko-KR', { year:'numeric', month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' }) : '접속 기록 없음';
+                const actions = u.status === 'pending'
+                    ? `<div class="flex items-center justify-center gap-2"><button onclick="approveUser('${esc(u.name)}')" class="px-4 py-2 text-xs bg-emerald-600 text-white font-bold rounded-lg hover:bg-emerald-700 shadow-sm">승인</button><button onclick="rejectUser('${esc(u.name)}')" class="px-4 py-2 text-xs bg-rose-50 text-rose-700 font-bold rounded-lg border border-rose-200 hover:bg-rose-100">반려</button></div>`
+                    : `<div class="flex items-center justify-center gap-1"><button onclick="openAdminUserModal('${esc(u.name)}')" class="px-3 py-1.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg border border-slate-300">수정</button><button onclick="openDeleteUserModal('${esc(u.name)}')" class="px-3 py-1.5 text-[11px] bg-red-50 hover:bg-red-100 text-red-600 rounded-lg border border-red-200">삭제</button></div>`;
                 tr.innerHTML = `
-                    <td class="py-2.5 px-3">
-                        <div class="font-bold text-slate-800">${u.name}</div>
-                        <div class="text-[10px] font-mono text-slate-400">${u.empNo || '-'}</div>
-                    </td>
-                    <td class="py-2.5 px-3 text-slate-600">${u.dept}</td>
-                    <td class="py-2.5 px-2 text-center">${statusBadge}</td>
-                    <td class="py-2.5 px-2 text-center">${roleBadge}</td>
-                    <td class="py-2.5 px-2 text-center">
-                        <div class="flex items-center justify-center space-x-1">
-                            ${approveBtn}
-                            <button onclick="openAdminUserModal('${u.name}')" class="px-2 py-0.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition border border-slate-300">
-                                수정
-                            </button>
-                            <button onclick="openDeleteUserModal('${u.name}')" class="px-2 py-0.5 text-[11px] bg-red-50 hover:bg-red-100 text-red-600 rounded transition border border-red-200">
-                                삭제
-                            </button>
-                        </div>
-                    </td>
-                `;
+                    <td class="py-3 px-3"><div class="flex items-center gap-2.5"><span class="w-9 h-9 shrink-0 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center font-extrabold text-sm">${initials}</span><div><div class="font-bold text-slate-800">${esc(u.name)}</div><div class="text-[10px] font-mono text-slate-400 mt-0.5">${esc(u.empNo || '사번 미지정')}</div></div></div></td>
+                    <td class="py-3 px-3"><span class="inline-flex px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">${esc(u.dept || '미지정')}</span></td>
+                    <td class="py-3 px-2 text-center">${statusBadge}</td>
+                    <td class="py-3 px-2 text-center">${roleBadge}</td>
+                    <td class="py-3 px-3"><div class="text-slate-700">가입 ${created}</div><div class="text-[10px] text-slate-400 mt-1">최근 접속 ${lastLogin}</div></td>
+                    <td class="py-3 px-3 text-center">${actions}</td>`;
                 tbody.appendChild(tr);
             });
+            if (window.lucide) lucide.createIcons();
         }
 
         function openDeleteUserModal(userName) {
@@ -5900,6 +5995,7 @@
                 user.status = 'approved';
                 saveToLocalStorage();
                 showToast(`${userName} 님의 가입이 승인되었습니다.`);
+                renderAdminUserDeptTabs();
                 renderAdminUsersTable();
             }
         }
@@ -6115,11 +6211,15 @@
         function renderAdminNotifications() {
             const container = document.getElementById('admin-new-claims-container');
             const badge = document.getElementById('admin-new-claim-badge');
+            const headerBadge = document.getElementById('admin-new-claim-header-badge');
             const ping = document.getElementById('admin-notif-ping');
+            const headerPing = document.getElementById('admin-notif-header-ping');
             if (!container) return;
 
             const unread = claimsData.filter(c => !c.readByAdmin);
             if (badge) badge.textContent = `${unread.length}건`;
+            if (headerBadge) headerBadge.textContent = `${unread.length}`;
+            if (headerPing) headerPing.classList.toggle('hidden', unread.length === 0);
 
             if (unread.length === 0) {
                 if (ping) ping.classList.add('hidden');
@@ -6141,6 +6241,16 @@
                 </div>
             `).join('');
             lucide.createIcons();
+        }
+
+        function toggleAdminNotificationPanel() {
+            const panel = document.getElementById('admin-notification-panel');
+            if (!panel) return;
+            panel.classList.toggle('hidden');
+            if (!panel.classList.contains('hidden')) {
+                renderAdminNotifications();
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
         }
 
         function refreshAdminNotifications() {
