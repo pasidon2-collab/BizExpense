@@ -54,7 +54,7 @@
 
         async function loadFirebaseProfile(authUser) {
             if (!firebaseDb || !authUser) throw new Error("Firebase 연결을 확인할 수 없습니다.");
-            const snap = await firebaseDb.collection("users").doc(authUser.uid).get();
+            const snap = await firebaseDb.collection("user").doc(authUser.uid).get();
             if (!snap.exists) throw new Error("Firebase에 사용자 정보가 없습니다. 관리자에게 Firestore users 문서 등록을 요청해주세요.");
             const profile = snap.data() || {};
             if (profile.status !== "approved") {
