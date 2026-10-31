@@ -2944,8 +2944,15 @@
             firestoreSaveQueue = firestoreSaveQueue
                 .then(() => persistBusinessDataToFirestore())
                 .catch(err => {
-                    console.error('Firestore 업무 데이터 저장 실패:', err);
-                    showToast('Firebase 저장에 실패했습니다. 인터넷 및 Firestore 보안 규칙을 확인해주세요.');
+                    console.error('[BizExpense 진단] Firestore 업무 데이터 저장 실패', {
+                        code: err && err.code ? err.code : 'unknown',
+                        message: err && err.message ? err.message : String(err),
+                        userUid: currentUser && currentUser.uid,
+                        userRole: currentUser && currentUser.role
+                    }, err);
+                    const errorCode = err && err.code ? err.code : 'unknown';
+                    const errorMessage = err && err.message ? err.message : String(err);
+                    showToast('Firebase 저장 오류 [' + errorCode + ']: ' + errorMessage);
                 });
         }
 
@@ -3049,8 +3056,16 @@
                 renderDeptChips();
                 showNoticePopupIfNeeded();
             } catch (err) {
-                console.error('Firestore 업무 데이터 불러오기 실패:', err);
-                showToast('Firebase 업무 데이터를 불러오지 못했습니다. Firestore 보안 규칙을 확인해주세요.');
+                console.error('[BizExpense 진단] Firestore 업무 데이터 불러오기 실패', {
+                    code: err && err.code ? err.code : 'unknown',
+                    message: err && err.message ? err.message : String(err),
+                    userUid: currentUser && currentUser.uid,
+                    userRole: currentUser && currentUser.role,
+                    userStatus: currentUser && currentUser.status
+                }, err);
+                const errorCode = err && err.code ? err.code : 'unknown';
+                const errorMessage = err && err.message ? err.message : String(err);
+                showToast('Firebase 오류 [' + errorCode + ']: ' + errorMessage);
             } finally {
                 firestoreLoadInProgress = false;
             }
