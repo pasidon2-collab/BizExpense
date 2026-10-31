@@ -2800,6 +2800,7 @@
                         }
                         try {
                             currentUser = await loadFirebaseProfile(authUser);
+                            await loadBusinessDataFromFirestore();
                             checkAuth();
                         } catch (profileError) {
                             console.error("Firebase 사용자 정보 확인 실패:", profileError);
@@ -2911,6 +2912,13 @@
             }
         }
 
+        // 정산서 삭제는 로컬 목록뿐 아니라 Firestore 문서에도 반영합니다.
+        async function deleteClaimFromFirestore(claim) {
+            if (!firebaseDb || !currentUser || !firestoreDataReady || !claim) return;
+            const docId = firestoreDocId(claim, 'claim');
+            await firebaseDb.collection('claims').doc(docId).delete();
+        }
+
         async function persistBusinessDataToFirestore() {
             if (!firebaseDb || !currentUser || !firestoreDataReady) return;
             const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
@@ -2931,7 +2939,7 @@
         }
 
         function queueFirestoreSave() {
-            if (!firebaseDataReady || !currentUser) return;
+            if (!firestoreDataReady || !currentUser) return;
             firestoreSaveQueue = firestoreSaveQueue
                 .then(() => persistBusinessDataToFirestore())
                 .catch(err => {
@@ -4413,6 +4421,8 @@
                 if (idx !== -1) {
                     claimsData[idx] = {
                         ...claimsData[idx],
+                        // 과거 로컬 자료에 소유자 UID가 없던 경우 현재 작성/수정 계정을 기록합니다.
+                        ownerUid: claimsData[idx].ownerUid || (currentUser ? currentUser.uid : ''),
                         tripType,
                         empName,
                         location,
@@ -4968,13 +4978,21 @@
             const idx = claimsData.findIndex(c => String(c.id) === String(selectedClaimId) || (c.uid && String(c.uid) === String(selectedClaimId)));
             if (idx === -1) return;
 
-            const targetId = claimsData[idx].id;
+            const targetClaim = claimsData[idx];
+            const targetId = targetClaim.id;
             claimsData.splice(idx, 1);
-            saveToLocalStorage();
+            saveToLocalStorage(false);
             syncLeaveRecordsFromClaims();
             closeModal();
-            showToast(`정산서 [${targetId}]가 정상적으로 삭제되었습니다.`);
             renderClaimsTable();
+            // 화면 삭제를 먼저 반영하고 클라우드 삭제 실패 시 오류를 명확히 알립니다.
+            deleteClaimFromFirestore(targetClaim).then(() => {
+                saveToLocalStorage(false);
+                showToast(`정산서 [${targetId}]가 삭제되었습니다.`);
+            }).catch(err => {
+                console.error('Firestore 정산서 삭제 실패:', err);
+                showToast('화면에서는 삭제했지만 Firebase 삭제에 실패했습니다. Firestore 권한을 확인해주세요.');
+            });
         }
 
         function openVoucherPrintModal() {
