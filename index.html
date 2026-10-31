@@ -3081,7 +3081,7 @@
             try {
                 const email = firebaseEmailForName(name);
                 createdCredential = await firebaseAuth.createUserWithEmailAndPassword(email, password);
-                await firebaseDb.collection('users').doc(createdCredential.user.uid).set({
+                await firebaseDb.collection('user').doc(createdCredential.user.uid).set({
                     name: name,
                     department: dept,
                     empNo: '',
