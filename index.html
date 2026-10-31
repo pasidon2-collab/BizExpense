@@ -3209,8 +3209,10 @@
                 const sec = document.getElementById('tab-admin-dashboard');
                 if (sec) { sec.classList.remove('hidden'); sec.style.display = 'block'; }
                 if (btnAdmin) btnAdmin.className = 'w-full flex items-center space-x-2.5 px-3 py-2.5 text-xs font-bold rounded-lg text-purple-800 bg-purple-50/80 border-l-3 border-purple-600 transition shadow-2xs';
-                initAdminUserSelectOptions();
-                switchAdminMainTab(currentAdminMainTab);
+                loadFirestoreUsers().then(() => {
+                    initAdminUserSelectOptions();
+                    switchAdminMainTab(currentAdminMainTab);
+                });
             }
             if (window.lucide) lucide.createIcons();
         }
@@ -5901,6 +5903,36 @@
             }
         }
 
+        // Firebase Firestore의 user 컬렉션을 회원 관리 목록의 기준 데이터로 사용합니다.
+        async function loadFirestoreUsers() {
+            if (!firebaseDb || !currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+                return;
+            }
+            try {
+                const snapshot = await firebaseDb.collection('user').get();
+                registeredUsers = snapshot.docs.map(doc => {
+                    const data = doc.data() || {};
+                    return {
+                        uid: doc.id,
+                        name: data.name || '',
+                        dept: data.department || data.dept || '',
+                        empNo: data.empNo || '',
+                        role: data.role || 'user',
+                        status: data.status || 'pending',
+                        createdAt: data.createdAt || '',
+                        lastLoginAt: data.lastLoginAt || ''
+                    };
+                });
+                saveToLocalStorage();
+                renderAdminUserDeptTabs();
+                renderAdminUsersTable();
+                initAdminUserSelectOptions();
+            } catch (err) {
+                console.error('Firestore 회원 목록 조회 실패:', err);
+                showToast('회원 목록을 불러오지 못했습니다. Firestore user 컬렉션의 관리자 조회 권한을 확인해주세요.');
+            }
+        }
+
         function switchAdminUserView(view, roleFilter = 'all') {
             currentAdminUserView = view === 'pending' ? 'pending' : 'all';
             currentAdminUserRoleFilter = roleFilter;
@@ -5918,15 +5950,25 @@
             renderAdminUsersTable();
         }
 
-        function rejectUser(userName) {
-            if (!confirm(`${userName}님의 가입 신청을 반려하시겠습니까?\n반려하면 해당 가입 신청 계정이 삭제됩니다.`)) return;
-            const idx = registeredUsers.findIndex(u => u.name === userName && u.status === 'pending');
-            if (idx < 0) return;
-            registeredUsers.splice(idx, 1);
-            saveToLocalStorage();
-            showToast(`${userName}님의 가입 신청이 반려되었습니다.`);
-            renderAdminUserDeptTabs();
-            renderAdminUsersTable();
+        async function rejectUser(userName) {
+            if (!confirm(`${userName}님의 가입 신청을 반려하시겠습니까?\n반려하면 Firestore의 회원 프로필 문서가 삭제됩니다.`)) return;
+            const user = registeredUsers.find(u => u.name === userName && u.status === 'pending');
+            if (!user) return;
+            if (!user.uid) {
+                showToast('회원의 Firebase UID를 찾을 수 없습니다. 회원 목록을 새로고침해주세요.');
+                return;
+            }
+            try {
+                await firebaseDb.collection('user').doc(user.uid).delete();
+                registeredUsers = registeredUsers.filter(u => u.uid !== user.uid);
+                saveToLocalStorage();
+                showToast(`${userName}님의 가입 신청 프로필이 삭제되었습니다.`);
+                renderAdminUserDeptTabs();
+                renderAdminUsersTable();
+            } catch (err) {
+                console.error('가입 신청 반려 실패:', err);
+                showToast('가입 신청 반려에 실패했습니다. Firestore user 문서 삭제 권한을 확인해주세요.');
+            }
         }
 
         function renderAdminUsersTable() {
@@ -6087,26 +6129,42 @@
             }
         }
 
-        function approveUser(userName) {
+        async function approveUser(userName) {
             const user = registeredUsers.find(u => u.name === userName);
-            if (user) {
-                if (!user.empNo) {
-                    const assignedEmpNo = prompt(`${userName}님의 사번을 입력하세요. (관리자 부여)`);
-                    if (!assignedEmpNo || !assignedEmpNo.trim()) {
-                        showToast('사번을 입력해야 회원 승인이 가능합니다.');
-                        return;
-                    }
-                    if (registeredUsers.some(u => u.empNo && u.empNo === assignedEmpNo.trim())) {
-                        showToast('이미 사용 중인 사번입니다.');
-                        return;
-                    }
-                    user.empNo = assignedEmpNo.trim();
+            if (!user) return;
+            if (!user.uid) {
+                showToast('회원의 Firebase UID를 찾을 수 없습니다. 회원 목록을 새로고침해주세요.');
+                return;
+            }
+
+            let empNo = user.empNo || '';
+            if (!empNo) {
+                const assignedEmpNo = prompt(`${userName}님의 사번을 입력하세요. (관리자 부여)`);
+                if (!assignedEmpNo || !assignedEmpNo.trim()) {
+                    showToast('사번을 입력해야 회원 승인이 가능합니다.');
+                    return;
                 }
+                empNo = assignedEmpNo.trim();
+                if (registeredUsers.some(u => u.uid !== user.uid && u.empNo && u.empNo === empNo)) {
+                    showToast('이미 사용 중인 사번입니다.');
+                    return;
+                }
+            }
+
+            try {
+                await firebaseDb.collection('user').doc(user.uid).update({
+                    empNo: empNo,
+                    status: 'approved'
+                });
+                user.empNo = empNo;
                 user.status = 'approved';
                 saveToLocalStorage();
                 showToast(`${userName} 님의 가입이 승인되었습니다.`);
                 renderAdminUserDeptTabs();
                 renderAdminUsersTable();
+            } catch (err) {
+                console.error('회원 승인 실패:', err);
+                showToast('회원 승인에 실패했습니다. Firestore user 문서 수정 권한을 확인해주세요.');
             }
         }
 
