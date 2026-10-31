@@ -2878,13 +2878,139 @@
             }
         }
 
-        function saveToLocalStorage() {
+        // 로컬 저장을 먼저 완료하고, 로그인된 사용자의 변경분을 Firestore에도 반영합니다.
+        // 기존 localStorage 자료는 클라우드 초기 이전 전까지 그대로 보존합니다.
+        let firestoreSaveQueue = Promise.resolve();
+        let firestoreDataReady = false;
+        let firestoreLoadInProgress = false;
+        const FIRESTORE_DATA_COLLECTIONS = {
+            claims: 'claims',
+            usedLeaves: 'leave_used',
+            earnedLeaves: 'leave_earned',
+            notices: 'notices',
+            departments: 'departments'
+        };
+
+        function firestoreDocId(record, fallbackPrefix) {
+            const raw = record && (record.id || record.uid);
+            return String(raw || (fallbackPrefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)))
+                .replace(/[\\/\\.#$[\\]]/g, '_');
+        }
+
+        async function writeArrayToFirestore(collectionName, records, idPrefix) {
+            if (!firebaseDb || !currentUser || !firestoreDataReady) return;
+            const batchLimit = 400;
+            for (let i = 0; i < records.length; i += batchLimit) {
+                const batch = firebaseDb.batch();
+                records.slice(i, i + batchLimit).forEach((record) => {
+                    const id = firestoreDocId(record, idPrefix);
+                    const data = { ...record, _docId: id };
+                    batch.set(firebaseDb.collection(collectionName).doc(id), data, { merge: true });
+                });
+                await batch.commit();
+            }
+        }
+
+        async function persistBusinessDataToFirestore() {
+            if (!firebaseDb || !currentUser || !firestoreDataReady) return;
+            const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
+            // 일반 직원은 본인 소유 정산/휴가사용 데이터만 저장합니다.
+            const ownClaims = claimsData.filter(c => c.ownerUid === currentUser.uid || c.uid === currentUser.uid);
+            const ownUsedLeaves = leaveUsedRecords.filter(r => r.ownerUid === currentUser.uid);
+            if (isAdmin) {
+                await writeArrayToFirestore('claims', claimsData, 'claim');
+                await writeArrayToFirestore('leave_used', leaveUsedRecords, 'used-leave');
+                await writeArrayToFirestore('leave_earned', manualEarnedLeaves, 'earned-leave');
+                await writeArrayToFirestore('notices', noticesData, 'notice');
+                const deptRecords = companyDepartments.map(name => ({ id: name, name }));
+                await writeArrayToFirestore('departments', deptRecords, 'department');
+            } else {
+                await writeArrayToFirestore('claims', ownClaims, 'claim');
+                await writeArrayToFirestore('leave_used', ownUsedLeaves, 'used-leave');
+            }
+        }
+
+        function queueFirestoreSave() {
+            if (!firebaseDataReady || !currentUser) return;
+            firestoreSaveQueue = firestoreSaveQueue
+                .then(() => persistBusinessDataToFirestore())
+                .catch(err => {
+                    console.error('Firestore 업무 데이터 저장 실패:', err);
+                    showToast('Firebase 저장에 실패했습니다. 인터넷 및 Firestore 보안 규칙을 확인해주세요.');
+                });
+        }
+
+        async function loadBusinessDataFromFirestore() {
+            if (!firebaseDb || !currentUser || firestoreLoadInProgress) return;
+            firestoreLoadInProgress = true;
+            firestoreDataReady = false;
+            try {
+                const names = ['claims', 'leave_used', 'leave_earned', 'notices', 'departments'];
+                const snaps = await Promise.all(names.map(name => firebaseDb.collection(name).get()));
+                const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
+                const readRecords = snap => snap.docs.map(doc => ({ ...doc.data(), id: doc.data().id || doc.id }));
+                let cloudClaims = readRecords(snaps[0]);
+                let cloudUsed = readRecords(snaps[1]);
+                let cloudEarned = readRecords(snaps[2]);
+                let cloudNotices = readRecords(snaps[3]);
+                let cloudDepartments = readRecords(snaps[4]).map(d => d.name || d.id).filter(Boolean);
+
+                if (isAdmin) {
+                    // 컬렉션별로 비어 있는 경우에만 기존 관리자 브라우저 자료를 해당 컬렉션으로 이전합니다.
+                    const seedIfEmpty = async (index, collection, records, prefix) => {
+                        if (snaps[index].empty && records.length) {
+                            await writeArrayToFirestore(collection, records, prefix);
+                            return records;
+                        }
+                        return records;
+                    };
+                    firestoreDataReady = true;
+                    cloudClaims = await seedIfEmpty(0, 'claims', claimsData, 'claim');
+                    cloudUsed = await seedIfEmpty(1, 'leave_used', leaveUsedRecords, 'used-leave');
+                    cloudEarned = await seedIfEmpty(2, 'leave_earned', manualEarnedLeaves, 'earned-leave');
+                    cloudNotices = await seedIfEmpty(3, 'notices', noticesData, 'notice');
+                    cloudDepartments = await seedIfEmpty(4, 'departments', companyDepartments.map(name => ({ id: name, name })), 'department')
+                        .then(rows => rows.map(d => d.name || d.id).filter(Boolean));
+                    localStorage.setItem('biz_firestore_migration_v1', 'done');
+                    claimsData = cloudClaims;
+                    leaveUsedRecords = cloudUsed;
+                    manualEarnedLeaves = cloudEarned;
+                    noticesData = cloudNotices;
+                    if (cloudDepartments.length) companyDepartments = cloudDepartments;
+                } else {
+                    // 직원은 본인 출장/휴가 데이터와 공지 및 부서 목록을 내려받습니다.
+                    claimsData = cloudClaims.filter(c => c.ownerUid === currentUser.uid || c.uid === currentUser.uid ||
+                        String(c.empName || '').split(',').map(x => x.trim()).includes(currentUser.name));
+                    leaveUsedRecords = cloudUsed.filter(r => r.ownerUid === currentUser.uid || r.user === currentUser.name);
+                    manualEarnedLeaves = cloudEarned.filter(r => r.ownerUid === currentUser.uid || r.user === currentUser.name);
+                    noticesData = cloudNotices;
+                    if (cloudDepartments.length) companyDepartments = cloudDepartments;
+                }
+                saveToLocalStorage(false);
+                firestoreDataReady = true;
+                updateAllDepartmentSelects();
+                syncLeaveRecordsFromClaims();
+                renderClaimsTable();
+                renderLeaveDashboard();
+                renderNoticeList();
+                renderDeptChips();
+                showNoticePopupIfNeeded();
+            } catch (err) {
+                console.error('Firestore 업무 데이터 불러오기 실패:', err);
+                showToast('Firebase 업무 데이터를 불러오지 못했습니다. Firestore 보안 규칙을 확인해주세요.');
+            } finally {
+                firestoreLoadInProgress = false;
+            }
+        }
+
+        function saveToLocalStorage(syncCloud = true) {
             localStorage.setItem('biz_claims', JSON.stringify(claimsData));
             localStorage.setItem('biz_users', JSON.stringify(registeredUsers));
             localStorage.setItem('biz_departments', JSON.stringify(companyDepartments));
             localStorage.setItem('biz_used_leaves', JSON.stringify(leaveUsedRecords));
             localStorage.setItem('biz_manual_leaves', JSON.stringify(manualEarnedLeaves));
             localStorage.setItem('biz_notices', JSON.stringify(noticesData));
+            if (syncCloud) queueFirestoreSave();
         }
 
         function setLoginType(type) {
@@ -4309,6 +4435,7 @@
             } else {
                 const newClaimId = generateUniqueClaimId();
                 const newClaim = {
+                    ownerUid: currentUser ? currentUser.uid : '',
                     uid: 'CLM-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7),
                     id: newClaimId,
                     tripType,
@@ -5518,6 +5645,8 @@
             }
 
             const newRec = {
+                ownerUid: currentUser ? currentUser.uid : '',
+                createdByUid: currentUser ? currentUser.uid : '',
                 id: `MANUAL-${Date.now()}`,
                 user,
                 date,
@@ -5564,6 +5693,7 @@
             }
 
             const newRec = {
+                ownerUid: currentUser ? currentUser.uid : '',
                 id: `USED-${Date.now()}`,
                 user,
                 date,
@@ -5665,6 +5795,7 @@
                     id: 'N' + Date.now() + Math.floor(Math.random() * 1000),
                     title, content, importance, popup,
                     author: currentUser ? currentUser.name : '',
+                    ownerUid: currentUser ? currentUser.uid : '',
                     createdAt: now,
                     updatedAt: now
                 });
