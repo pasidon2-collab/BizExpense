@@ -2301,6 +2301,48 @@
             { region: '중동/기타', country: '남아프리카', code: 'ZAR', symbol: 'R', name: '남아공 랜드', rate: 75.30 }
         ];
 
+        // 공용 현지통화 목록을 Firestore에 저장/불러오기
+        async function saveSharedCurrencyToFirestore(currency) {
+            if (!firebaseDb || !currentUser || !firestoreDataReady) return;
+            const code = String(currency?.code || '').toUpperCase();
+            if (!/^[A-Z]{3}$/.test(code)) throw new Error('통화 코드가 올바르지 않습니다.');
+            await firebaseDb.collection('overseas_currencies').doc(code).set({
+                ...currency, code, updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                updatedBy: currentUser.uid
+            }, { merge: true });
+        }
+
+        async function removeSharedCurrencyFromFirestore(code) {
+            if (!firebaseDb || !currentUser || !firestoreDataReady) return;
+            if (!['admin', 'super_admin'].includes(currentUser.role)) {
+                throw new Error('공용 통화 삭제는 관리자만 할 수 있습니다.');
+            }
+            await firebaseDb.collection('overseas_currencies').doc(String(code).toUpperCase()).delete();
+        }
+
+        async function loadSharedCurrenciesFromFirestore() {
+            if (!firebaseDb || !currentUser) return;
+            const snap = await firebaseDb.collection('overseas_currencies').get();
+            if (snap.empty) {
+                if (['admin', 'super_admin'].includes(currentUser.role) && activeOverseasCurrencies.length) {
+                    const batch = firebaseDb.batch();
+                    activeOverseasCurrencies.forEach(c => {
+                        batch.set(firebaseDb.collection('overseas_currencies').doc(c.code), {
+                            ...c, code: c.code, updatedBy: currentUser.uid
+                        }, { merge: true });
+                    });
+                    await batch.commit();
+                }
+                return;
+            }
+            const cloudCurrencies = snap.docs.map(d => ({ ...d.data(), code: d.id }));
+            const merged = new Map(activeOverseasCurrencies.map(c => [c.code, c]));
+            cloudCurrencies.forEach(c => merged.set(c.code, c));
+            activeOverseasCurrencies = Array.from(merged.values());
+            localStorage.setItem('biz_active_currencies', JSON.stringify(activeOverseasCurrencies));
+            renderActiveCurrenciesDropdown();
+        }
+
         // 기준 통화 드롭다운 및 통화 관리 칩 렌더링
         function renderActiveCurrenciesDropdown() {
             const selectEl = document.getElementById('form-currency');
@@ -2348,8 +2390,13 @@
             }
 
             const target = activeOverseasCurrencies.find(c => c.code === code);
+            if (firebaseDb && currentUser && !['admin', 'super_admin'].includes(currentUser.role)) {
+                showToast('공용 통화 삭제는 관리자만 할 수 있습니다.');
+                return;
+            }
             activeOverseasCurrencies = activeOverseasCurrencies.filter(c => c.code !== code);
             localStorage.setItem('biz_active_currencies', JSON.stringify(activeOverseasCurrencies));
+            removeSharedCurrencyFromFirestore(code).catch(err => showToast('Firebase 통화 삭제 오류: ' + (err.message || err)));
 
             renderActiveCurrenciesDropdown();
             handleCurrencyChange();
@@ -2432,9 +2479,13 @@
 
         function selectAndAddCurrency(code, country, symbol, name, defaultRate) {
             const existing = activeOverseasCurrencies.find(c => c.code === code);
+            const selectedCurrency = existing || { code, symbol, country, name, rate: defaultRate };
             if (!existing) {
-                activeOverseasCurrencies.push({ code, symbol, country, name, rate: defaultRate });
+                activeOverseasCurrencies.push(selectedCurrency);
                 localStorage.setItem('biz_active_currencies', JSON.stringify(activeOverseasCurrencies));
+                saveSharedCurrencyToFirestore(selectedCurrency).catch(err =>
+                    showToast('공용 통화 저장 실패: ' + (err.message || err))
+                );
             }
 
             renderActiveCurrenciesDropdown();
@@ -2646,6 +2697,7 @@
                         rate: targetItem.rate
                     });
                     localStorage.setItem('biz_active_currencies', JSON.stringify(activeOverseasCurrencies));
+                    saveSharedCurrencyToFirestore(activeOverseasCurrencies[activeOverseasCurrencies.length - 1]).catch(err => showToast('공용 통화 저장 실패: ' + (err.message || err)));
                     renderActiveCurrenciesDropdown();
                 }
 
@@ -3186,6 +3238,8 @@
                     noticesData = cloudNotices;
                     if (cloudDepartments.length) companyDepartments = cloudDepartments;
                 }
+                // 로그인한 모든 직원이 공용 현지통화 목록을 동일하게 사용합니다.
+                await loadSharedCurrenciesFromFirestore();
                 saveToLocalStorage(false);
                 firestoreDataReady = true;
                 updateAllDepartmentSelects();
@@ -4157,29 +4211,71 @@
             const isOverseas = document.getElementById('form-trip-type').value === 'overseas';
             const cur = isOverseas ? (document.getElementById('form-currency').value || 'USD') : 'KRW';
 
-            // 현재 화면의 입력값을 먼저 데이터에 반영한 뒤, 기준통화 변경 시 모든 날짜/결제수단의 금액을 환산합니다.
+            // 화면 입력값을 먼저 보존합니다. 편집 중인 정산서는 추적 변수가 비어 있을 수 있으므로
+            // 기존 일자/세부 항목에 저장된 통화에서 변경 전 기준통화를 추정합니다.
             if (isOverseas) {
                 saveCurrentRenderedRowsData();
-                const oldBaseCur = lastSelectedOverseasBaseCurrency;
+
+                let oldBaseCur = lastSelectedOverseasBaseCurrency;
+                if (!oldBaseCur && Array.isArray(expenseRowDataList)) {
+                    const firstKnownDay = expenseRowDataList.find(day => day && (day.currency || day.expenses));
+                    if (firstKnownDay) {
+                        oldBaseCur = firstKnownDay.currency ||
+                            Object.values(firstKnownDay.expenses || {}).map(exp => exp && exp.currency).find(Boolean) ||
+                            null;
+                    }
+                }
+
                 if (oldBaseCur && oldBaseCur !== cur && Array.isArray(expenseRowDataList)) {
-                    const oldBaseRate = Math.max(0.000001, parseFloat(document.getElementById('form-exchange-rate')?.value) || getCurrencyRateAgainstKRW(oldBaseCur));
-                    const newBaseRate = Math.max(0.000001, getCurrencyRateAgainstKRW(cur));
+                    const oldBaseRate = Math.max(0.000001, Number(getCurrencyRateAgainstKRW(oldBaseCur)) || 1);
+                    const newBaseRate = Math.max(0.000001, Number(getCurrencyRateAgainstKRW(cur)) || 1);
+
                     expenseRowDataList.forEach(day => {
-                        if (!day || !day.expenses) return;
+                        if (!day) return;
+                        if (!day.expenses) day.expenses = createEmptyCategoryData();
+
                         ['breakfast', 'lunch', 'dinner', 'lodging', 'transport', 'other'].forEach(category => {
-                            const expense = day.expenses[category];
-                            if (!expense || !(Number(expense.amount) > 0)) return;
+                            let expense = day.expenses[category];
+                            if (!expense) {
+                                expense = day.expenses[category] = {
+                                    amount: 0, payMethod: '법인카드', currency: oldBaseCur
+                                };
+                            }
+
                             const sourceCur = expense.currency || day.currency || oldBaseCur;
-                            const sourceRate = sourceCur === oldBaseCur
-                                ? oldBaseRate
-                                : getCurrencyRateAgainstKRW(sourceCur);
-                            const converted = Number(expense.amount) * sourceRate / newBaseRate;
-                            expense.amount = Math.round((converted + Number.EPSILON) * 100) / 100;
+                            const sourceRate = Math.max(
+                                0.000001,
+                                Number(getCurrencyRateAgainstKRW(sourceCur)) ||
+                                    (sourceCur === oldBaseCur ? oldBaseRate : 1)
+                            );
+
+                            // 금액이 입력된 항목만 환산하고, 금액 유무와 관계없이 통화 표시는 기준통화로 통일합니다.
+                            if (Number(expense.amount) > 0) {
+                                const converted = Number(expense.amount) * sourceRate / newBaseRate;
+                                expense.amount = Math.round((converted + Number.EPSILON) * 100) / 100;
+                            }
                             expense.currency = cur;
+                        });
+
+                        day.currency = cur;
+                    });
+                } else if (Array.isArray(expenseRowDataList)) {
+                    // 기준통화가 최초 설정되었거나 기존 통화를 추정할 수 없는 경우에도
+                    // 모든 일자별 세부 항목의 통화 코드를 기준통화로 맞춥니다.
+                    expenseRowDataList.forEach(day => {
+                        if (!day) return;
+                        if (!day.expenses) day.expenses = createEmptyCategoryData();
+                        ['breakfast', 'lunch', 'dinner', 'lodging', 'transport', 'other'].forEach(category => {
+                            if (!day.expenses[category]) {
+                                day.expenses[category] = { amount: 0, payMethod: '법인카드', currency: cur };
+                            } else {
+                                day.expenses[category].currency = cur;
+                            }
                         });
                         day.currency = cur;
                     });
                 }
+
                 lastSelectedOverseasBaseCurrency = cur;
             } else {
                 lastSelectedOverseasBaseCurrency = null;
