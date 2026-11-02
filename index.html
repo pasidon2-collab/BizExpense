@@ -5611,47 +5611,125 @@
             URL.revokeObjectURL(url);
         }
 
-        function initKakaoMapSdk() {
-            const savedKey = localStorage.getItem('biz_kakao_key') || '';
+        let kakaoJavaScriptKey = '';
+
+        async function loadKakaoKeyFromFirebase() {
+            try {
+                if (firebaseDb && currentUser) {
+                    const doc = await firebaseDb.collection('settings').doc('kakao_map').get();
+                    if (doc.exists && doc.data().javascriptKey) {
+                        kakaoJavaScriptKey = String(doc.data().javascriptKey).trim();
+                        localStorage.setItem('biz_kakao_key', kakaoJavaScriptKey);
+                    }
+                }
+            } catch (err) {
+                console.warn('[Kakao Map] Firebase 키 조회 실패:', err);
+            }
+            if (!kakaoJavaScriptKey) {
+                kakaoJavaScriptKey = localStorage.getItem('biz_kakao_key') || '';
+            }
             const keyInput = document.getElementById('kakao-api-key-input');
-            if (keyInput) keyInput.value = savedKey;
-            if (savedKey) loadKakaoSdkScript(savedKey);
+            if (keyInput) keyInput.value = kakaoJavaScriptKey;
+            if (kakaoJavaScriptKey) loadKakaoSdkScript(kakaoJavaScriptKey);
+            else showKakaoMapError('카카오 JavaScript 키가 등록되지 않았습니다. 최고관리자에게 키 등록을 요청해 주세요.');
+        }
+
+        function initKakaoMapSdk() {
+            loadKakaoKeyFromFirebase();
+        }
+
+        let kakaoSdkLoading = false;
+        function showKakaoMapError(message) {
+            const container = document.getElementById('kakao-map-container');
+            if (!container) return;
+            let notice = document.getElementById('kakao-key-notice');
+            if (!notice) {
+                notice = document.createElement('div');
+                notice.id = 'kakao-key-notice';
+                notice.className = 'text-center p-6 max-w-lg mx-auto';
+                container.replaceChildren(notice);
+            }
+            notice.classList.remove('hidden');
+            notice.innerHTML = `
+                <div class="font-bold text-red-700 text-sm mb-2">카카오맵을 불러오지 못했습니다.</div>
+                <p class="text-xs text-slate-600 whitespace-pre-line">${String(message).replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}</p>
+                <p class="text-xs text-slate-500 mt-3">카카오 개발자 콘솔의 플랫폼(Web) 도메인, JavaScript 키, 카카오맵 사용 설정을 확인해 주세요.</p>`;
+            console.error('[Kakao Map]', message);
         }
 
         function loadKakaoSdkScript(apiKey, callback) {
+            if (!apiKey) {
+                showKakaoMapError('JavaScript 키가 등록되지 않았습니다.');
+                return;
+            }
+            if (kakaoSdkLoading) return;
+            kakaoSdkLoading = true;
+
             const existingScript = document.getElementById('kakao-map-sdk-script');
             if (existingScript) existingScript.remove();
 
             const script = document.createElement('script');
             script.id = 'kakao-map-sdk-script';
+            script.async = true;
             script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${encodeURIComponent(apiKey)}&libraries=services&autoload=false`;
             script.onload = () => {
-                if (window.kakao && window.kakao.maps) {
-                    window.kakao.maps.load(() => {
-                        if (callback) callback();
-                        else renderTripMap();
-                    });
+                kakaoSdkLoading = false;
+                if (window.kakao && window.kakao.maps && typeof window.kakao.maps.load === 'function') {
+                    try {
+                        window.kakao.maps.load(() => {
+                            try {
+                                if (callback) callback();
+                                else renderTripMap();
+                            } catch (err) {
+                                showKakaoMapError(err.message || '지도 초기화 중 오류가 발생했습니다.');
+                            }
+                        });
+                    } catch (err) {
+                        showKakaoMapError(err.message || '카카오 지도 SDK 초기화에 실패했습니다.');
+                    }
+                } else {
+                    showKakaoMapError('SDK는 응답했지만 kakao.maps 객체를 찾을 수 없습니다. JavaScript 키와 Web 플랫폼 도메인을 확인해 주세요.');
                 }
+            };
+            script.onerror = () => {
+                kakaoSdkLoading = false;
+                showKakaoMapError('카카오 지도 SDK 파일을 불러오지 못했습니다. 인터넷 연결, JavaScript 키, Web 플랫폼 도메인 등록을 확인해 주세요.');
             };
             document.head.appendChild(script);
         }
 
-        function saveAndApplyKakaoKey() {
+        async function saveAndApplyKakaoKey() {
             const keyInput = document.getElementById('kakao-api-key-input');
             const key = keyInput ? keyInput.value.trim() : '';
             if (!key) {
                 showToast('카카오 JavaScript 키를 입력해주세요.');
                 return;
             }
-            localStorage.setItem('biz_kakao_key', key);
-            showToast('카카오 JavaScript 키가 저장되었습니다.');
-            loadKakaoSdkScript(key, () => renderTripMap());
+            if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+                showToast('카카오 JavaScript 키 등록은 관리자만 가능합니다.');
+                return;
+            }
+            try {
+                if (!firebaseDb) throw new Error('Firebase 연결이 준비되지 않았습니다.');
+                await firebaseDb.collection('settings').doc('kakao_map').set({
+                    javascriptKey: key,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                    updatedBy: currentUser.uid
+                }, { merge: true });
+                kakaoJavaScriptKey = key;
+                localStorage.setItem('biz_kakao_key', key);
+                showToast('카카오 JavaScript 키가 Firebase에 저장되었습니다.');
+                loadKakaoSdkScript(key, () => renderTripMap());
+            } catch (err) {
+                showToast('Firebase 키 저장 실패: ' + (err.message || err));
+                console.error('[Kakao Map] Firebase save failed:', err);
+            }
         }
 
         function renderTripMap() {
             const container = document.getElementById('kakao-map-container');
             const notice = document.getElementById('kakao-key-notice');
-            const savedKey = localStorage.getItem('biz_kakao_key');
+            const savedKey = kakaoJavaScriptKey || localStorage.getItem('biz_kakao_key') || '';
 
             if (!savedKey) {
                 if (notice) notice.classList.remove('hidden');
@@ -5702,12 +5780,17 @@
                 }
             });
 
-            if (!kakaoMapInstance) {
-                const options = { center: new kakao.maps.LatLng(36.35, 127.8), level: 12 };
-                kakaoMapInstance = new kakao.maps.Map(container, options);
-                kakaoInfoWindow = new kakao.maps.InfoWindow({ zIndex: 10 });
-            } else {
-                kakaoMapInstance.relayout();
+            try {
+                if (!kakaoMapInstance) {
+                    const options = { center: new kakao.maps.LatLng(36.35, 127.8), level: 12 };
+                    kakaoMapInstance = new kakao.maps.Map(container, options);
+                    kakaoInfoWindow = new kakao.maps.InfoWindow({ zIndex: 10 });
+                } else {
+                    kakaoMapInstance.relayout();
+                }
+            } catch (err) {
+                showKakaoMapError(err.message || '지도 객체 생성에 실패했습니다.');
+                return;
             }
 
             kakaoMapMarkers.forEach(m => m.setMap(null));
