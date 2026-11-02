@@ -828,10 +828,6 @@
                                 <option value="2027">2027년</option>
                             </select>
                         </div>
-                        <button type="button" id="employee-leave-add-button" onclick="openAddLeaveModal()" class="hidden px-3.5 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg items-center space-x-1.5 shadow transition">
-                            <i data-lucide="plus" class="w-4 h-4"></i>
-                            <span>대체휴무 추가</span>
-                        </button>
                     </div>
                 </div>
 
@@ -5657,9 +5653,7 @@
         function renderLeaveDashboard() {
             if (!currentUser) return;
             const isAdminForLeave = ['admin', 'super_admin'].includes(currentUser.role);
-            const employeeAddButton = document.getElementById('employee-leave-add-button');
             const adminAddButton = document.getElementById('admin-add-leave-button');
-            if (employeeAddButton) employeeAddButton.classList.add('hidden');
             if (adminAddButton) { adminAddButton.classList.toggle('hidden', !isAdminForLeave); adminAddButton.classList.toggle('flex', isAdminForLeave); }
             const targetUser = currentUser.name;
             const yearSelect = document.getElementById('leave-year-select');
@@ -5849,7 +5843,7 @@
             const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
             if (!isAdmin) { showToast('대체휴무 수정은 관리자만 할 수 있습니다.'); return; }
             const record = manualEarnedLeaves.find(r => String(r.id) === String(leaveId));
-            if (!record) { showToast('수정할 수동 대체휴무를 찾을 수 없습니다.'); return; }
+            if (!record || record.isManual === false) { showToast('수정할 수동 대체휴무를 찾을 수 없습니다.'); return; }
             editingLeaveId = record.id;
             const selectUser = document.getElementById('add-leave-user-select');
             selectUser.innerHTML = (registeredUsers || []).filter(u => u && u.uid).map(u => `<option value="${u.name}">${u.name} (${u.dept || ''})</option>`).join('');
@@ -5871,7 +5865,7 @@
             modal.style.display = 'none';
         }
 
-        function handleAddLeaveSubmit(e) {
+        async function handleAddLeaveSubmit(e) {
             e.preventDefault();
             const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
             const selectedUser = document.getElementById('add-leave-user-select').value;
@@ -5917,13 +5911,48 @@
                     reason: `[수동추가] ${reason}`
                 });
             }
-            saveToLocalStorage();
-            syncLeaveRecordsFromClaims();
-            closeAddLeaveModal();
-            showToast(editingLeaveId ? `${user} 회원의 대체휴무가 수정되었습니다.` : `${user} 회원에게 대체휴무 ${days}일이 추가되었습니다.`);
-            editingLeaveId = null;
-            renderLeaveDashboard();
-            if (currentAdminMainTab === 'leave') renderCompanyLeaveLiabilityTable();
+            try {
+                saveToLocalStorage();
+                // 관리자 수동 부여 휴가는 Firestore에서도 즉시 저장합니다.
+                if (firebaseDb && firestoreDataReady) {
+                    await persistBusinessDataToFirestore();
+                }
+                syncLeaveRecordsFromClaims();
+                closeAddLeaveModal();
+                showToast(editingLeaveId ? `${user} 회원의 대체휴무가 수정되었습니다.` : `${user} 회원에게 대체휴무 ${days}일이 추가되었습니다.`);
+                editingLeaveId = null;
+                renderLeaveDashboard();
+                renderAdminLeaveEarned();
+                if (currentAdminMainTab === 'leave') renderCompanyLeaveLiabilityTable();
+            } catch (err) {
+                console.error('관리자 대체휴무 저장 실패:', err);
+                showToast('대체휴무 저장에 실패했습니다. Firebase 권한과 연결 상태를 확인해주세요.');
+            }
+        }
+
+        async function deleteManualEarnedLeave(leaveId) {
+            const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
+            if (!isAdmin) { showToast('대체휴무 삭제는 관리자만 할 수 있습니다.'); return; }
+            const record = manualEarnedLeaves.find(r => String(r.id) === String(leaveId));
+            if (!record) { showToast('삭제할 수동 대체휴무를 찾을 수 없습니다.'); return; }
+            if (!confirm(`${record.user} 회원의 수동 대체휴무 ${record.days}일을 삭제하시겠습니까?`)) return;
+
+            try {
+                if (firebaseDb && firestoreDataReady) {
+                    const docId = firestoreDocId(record, 'earned-leave');
+                    await firebaseDb.collection('leave_earned').doc(docId).delete();
+                }
+                manualEarnedLeaves = manualEarnedLeaves.filter(r => String(r.id) !== String(leaveId));
+                saveToLocalStorage(false);
+                syncLeaveRecordsFromClaims();
+                renderAdminLeaveEarned();
+                renderLeaveDashboard();
+                renderCompanyLeaveLiabilityTable();
+                showToast('대체휴무가 삭제되었습니다.');
+            } catch (err) {
+                console.error('관리자 대체휴무 삭제 실패:', err);
+                showToast('대체휴무 삭제에 실패했습니다. Firebase 권한과 연결 상태를 확인해주세요.');
+            }
         }
 
         function openCompUsageModal() {
@@ -6698,7 +6727,7 @@
                     <td class="py-2.5 px-3">${formatDateWithKoreanDay(r.date)}</td>
                     <td class="py-2.5 px-3 text-center text-blue-600 font-bold font-mono">+${r.days}일</td>
                     <td class="py-2.5 px-3 text-center space-x-1">
-                        ${r.isManual === true || r.claimId === '수동부여' ? `<button onclick="openEditLeaveModal('${r.id}')" class="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition">수정</button>` : `<button onclick="openClaimModal('${r.claimId}')" class="px-2 py-0.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition">정산서 확인</button>`}
+                        ${r.isManual === true || r.claimId === '수동부여' ? `<button onclick="openEditLeaveModal('${r.id}')" class="px-2 py-0.5 text-[11px] bg-blue-50 hover:bg-blue-100 text-blue-700 rounded transition">수정</button><button onclick="deleteManualEarnedLeave('${r.id}')" class="px-2 py-0.5 text-[11px] bg-red-50 hover:bg-red-100 text-red-700 rounded transition">삭제</button>` : `<button onclick="openClaimModal('${r.claimId}')" class="px-2 py-0.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition">정산서 확인</button>`}
                     </td>
                 `;
                 tbody.appendChild(tr);
