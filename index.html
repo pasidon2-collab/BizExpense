@@ -2914,6 +2914,44 @@
             }
         }
 
+        // 부서 목록은 배열 전체가 기준 데이터이므로 Firestore와 완전 일치시킵니다.
+        // 기존 writeArrayToFirestore는 set만 수행해 삭제된 부서 문서가 클라우드에 남는 문제가 있었습니다.
+        async function syncDepartmentsToFirestore() {
+            if (!firebaseDb || !currentUser || !firestoreDataReady) {
+                throw new Error('Firebase 연결 또는 데이터 로딩 상태를 확인해주세요.');
+            }
+            if (!['admin', 'super_admin'].includes(currentUser.role)) {
+                throw new Error('부서 관리는 관리자만 할 수 있습니다.');
+            }
+            const collectionRef = firebaseDb.collection('departments');
+            const snapshot = await collectionRef.get();
+            const desired = new Map();
+            companyDepartments.forEach(name => {
+                const cleanName = String(name || '').trim();
+                if (!cleanName) return;
+                const id = firestoreDocId({ id: cleanName }, 'department');
+                desired.set(id, { id, name: cleanName });
+            });
+
+            const changes = [];
+            snapshot.docs.forEach(doc => {
+                if (!desired.has(doc.id)) changes.push({ type: 'delete', ref: doc.ref });
+            });
+            desired.forEach((record, id) => {
+                changes.push({ type: 'set', ref: collectionRef.doc(id), data: { ...record, _docId: id } });
+            });
+
+            for (let i = 0; i < changes.length; i += 400) {
+                const batch = firebaseDb.batch();
+                changes.slice(i, i + 400).forEach(change => {
+                    if (change.type === 'delete') batch.delete(change.ref);
+                    else batch.set(change.ref, change.data, { merge: true });
+                });
+                await batch.commit();
+            }
+            return true;
+        }
+
         // 정산서와 해당 정산서에서 자동 발생한 대체휴무를 함께 Firestore에서 삭제합니다.
         // 수동 부여 휴가(isManual !== false)는 삭제하지 않습니다.
         async function deleteClaimFromFirestore(claim) {
@@ -3033,8 +3071,7 @@
                 await writeArrayToFirestore('leave_used', leaveUsedRecords, 'used-leave');
                 await writeArrayToFirestore('leave_earned', [...manualEarnedLeaves, ...automaticEarned], 'earned-leave');
                 await writeArrayToFirestore('notices', noticesData, 'notice');
-                const deptRecords = companyDepartments.map(name => ({ id: name, name }));
-                await writeArrayToFirestore('departments', deptRecords, 'department');
+                await syncDepartmentsToFirestore();
             } else {
                 await writeArrayToFirestore('claims', ownClaims, 'claim');
                 await writeArrayToFirestore('leave_used', ownUsedLeaves, 'used-leave');
@@ -3550,44 +3587,57 @@
             `).join('');
         }
 
-        function addNewDepartment() {
+        async function addNewDepartment() {
             const input = document.getElementById('new-dept-name-input');
             const name = input ? input.value.trim() : '';
-            if (!name) {
-                showToast('추가할 부서명을 입력해주세요.');
-                return;
+            if (!name) { showToast('추가할 부서명을 입력해주세요.'); return; }
+            if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+                showToast('부서 관리는 관리자만 할 수 있습니다.'); return;
             }
-            if (companyDepartments.includes(name)) {
-                showToast('이미 등록된 부서명입니다.');
-                return;
-            }
+            if (companyDepartments.includes(name)) { showToast('이미 등록된 부서명입니다.'); return; }
 
+            const previous = [...companyDepartments];
             companyDepartments.push(name);
-            saveToLocalStorage();
-            updateAllDepartmentSelects();
-            renderDeptChips();
-            renderAdminUserDeptTabs();
-            input.value = '';
-            showToast(`[${name}] 부서가 성공적으로 추가되었습니다.`);
+            try {
+                await syncDepartmentsToFirestore();
+                saveToLocalStorage(false);
+                updateAllDepartmentSelects();
+                renderDeptChips();
+                renderAdminUserDeptTabs();
+                if (input) input.value = '';
+                showToast(`[${name}] 부서가 Firebase에 등록되었습니다.`);
+            } catch (err) {
+                companyDepartments = previous;
+                updateAllDepartmentSelects(); renderDeptChips(); renderAdminUserDeptTabs();
+                console.error('[부서 추가 Firebase 오류]', err);
+                showToast('부서 등록 실패 [' + (err.code || 'unknown') + ']: ' + (err.message || String(err)));
+            }
         }
 
-        function deleteDepartment(deptName) {
-            const hasUsers = registeredUsers.some(u => u.dept === deptName);
-            if (hasUsers) {
-                showToast(`[${deptName}]에 소속된 회원이 존재하여 삭제할 수 없습니다.`);
-                return;
+        async function deleteDepartment(deptName) {
+            if (!currentUser || !['admin', 'super_admin'].includes(currentUser.role)) {
+                showToast('부서 관리는 관리자만 할 수 있습니다.'); return;
             }
-            if (companyDepartments.length <= 1) {
-                showToast('최소 한 개의 부서는 유지되어야 합니다.');
-                return;
-            }
+            const hasUsers = registeredUsers.some(u => (u.dept || u.department) === deptName);
+            if (hasUsers) { showToast(`[${deptName}]에 소속된 회원이 존재하여 삭제할 수 없습니다.`); return; }
+            if (companyDepartments.length <= 1) { showToast('최소 한 개의 부서는 유지되어야 합니다.'); return; }
+            if (!confirm(`[${deptName}] 부서를 삭제하시겠습니까? Firebase에서도 삭제됩니다.`)) return;
 
+            const previous = [...companyDepartments];
             companyDepartments = companyDepartments.filter(d => d !== deptName);
-            saveToLocalStorage();
-            updateAllDepartmentSelects();
-            renderDeptChips();
-            renderAdminUserDeptTabs();
-            showToast(`[${deptName}] 부서가 삭제되었습니다.`);
+            try {
+                await syncDepartmentsToFirestore();
+                saveToLocalStorage(false);
+                updateAllDepartmentSelects();
+                renderDeptChips();
+                renderAdminUserDeptTabs();
+                showToast(`[${deptName}] 부서가 Firebase에서도 삭제되었습니다.`);
+            } catch (err) {
+                companyDepartments = previous;
+                updateAllDepartmentSelects(); renderDeptChips(); renderAdminUserDeptTabs();
+                console.error('[부서 삭제 Firebase 오류]', err);
+                showToast('부서 삭제 실패 [' + (err.code || 'unknown') + ']: ' + (err.message || String(err)));
+            }
         }
 
         function renderAdminUserDeptTabs() {
