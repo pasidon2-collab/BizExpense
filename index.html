@@ -2913,10 +2913,36 @@
             }
         }
 
-        // 정산서 삭제는 로컬 목록뿐 아니라 Firestore 문서에도 반영합니다.
+        // 정산서와 해당 정산서에서 자동 발생한 대체휴무를 함께 Firestore에서 삭제합니다.
+        // 수동 부여 휴가(isManual !== false)는 삭제하지 않습니다.
         async function deleteClaimFromFirestore(claim) {
             if (!firebaseDb || !currentUser || !firestoreDataReady || !claim) return;
+
             const docId = firestoreDocId(claim, 'claim');
+            const earnedRef = firebaseDb.collection('leave_earned');
+            let earnedQuery = earnedRef.where('claimId', '==', docId);
+
+            // 직원은 본인 UID로 소유권이 확인되는 문서만 조회할 수 있습니다.
+            // 관리자는 해당 정산서에 연결된 모든 직원의 자동 대체휴무를 조회합니다.
+            const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
+            if (!isAdmin) {
+                earnedQuery = earnedQuery.where('ownerUid', '==', currentUser.uid);
+            }
+
+            const earnedSnap = await earnedQuery.get();
+            const automaticLeaveRefs = earnedSnap.docs
+                .filter(doc => doc.data().isManual === false)
+                .map(doc => doc.ref);
+
+            // Firestore batch 제한(500개)을 고려해 대체휴무를 먼저 삭제합니다.
+            // 정산서 문서는 마지막 batch에 포함하여 대체휴무 삭제 실패 시 정산서가 남도록 합니다.
+            const chunkSize = 450;
+            for (let i = 0; i < automaticLeaveRefs.length; i += chunkSize) {
+                const batch = firebaseDb.batch();
+                automaticLeaveRefs.slice(i, i + chunkSize).forEach(ref => batch.delete(ref));
+                await batch.commit();
+            }
+
             await firebaseDb.collection('claims').doc(docId).delete();
         }
 
