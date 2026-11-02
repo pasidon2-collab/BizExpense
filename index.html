@@ -5796,11 +5796,7 @@
                     <td class="py-2 px-2 font-bold text-slate-800">${r.user}</td>
                     <td class="py-2 px-2 text-orange-600 font-bold font-mono">-${r.days}일</td>
                     <td class="py-2 px-2 text-slate-600 truncate max-w-[120px]" title="${r.reason}">${r.reason}</td>
-                    <td class="py-2 px-1 text-center">
-                        <button onclick="cancelUsedLeave('${r.id}')" title="사용 취소" class="text-slate-400 hover:text-red-500 p-1 rounded transition">
-                            <i data-lucide="x-circle" class="w-3.5 h-3.5"></i>
-                        </button>
-                    </td>
+                    <td class="py-2 px-1 text-center">${currentUser && ['admin', 'super_admin'].includes(currentUser.role) ? '<span class="text-slate-400 text-[11px]">관리자 대시보드에서 취소</span>' : '<span class="text-slate-300 text-[11px]">-</span>'}</td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -5972,7 +5968,7 @@
             modal.style.display = 'none';
         }
 
-        function handleCompUsageSubmit(e) {
+        async function handleCompUsageSubmit(e) {
             e.preventDefault();
             const user = document.getElementById('use-leave-user').value;
             const date = document.getElementById('use-leave-date').value;
@@ -5996,20 +5992,50 @@
             };
 
             leaveUsedRecords.push(newRec);
-            saveToLocalStorage();
-            closeCompUsageModal();
-            showToast('대체휴무 사용이 등록되었습니다.');
-            renderLeaveDashboard();
+            try {
+                // 사용 등록은 Firestore 저장이 완료된 뒤 성공 처리합니다.
+                if (!firebaseDb || !firestoreDataReady) {
+                    leaveUsedRecords = leaveUsedRecords.filter(r => r.id !== newRec.id);
+                    showToast('Firebase 연결이 준비되지 않아 등록하지 못했습니다. 다시 시도해주세요.');
+                    return;
+                }
+                const docId = firestoreDocId(newRec, 'used-leave');
+                await firebaseDb.collection('leave_used').doc(docId).set({ ...newRec, _docId: docId }, { merge: true });
+                saveToLocalStorage(false);
+                queueFirestoreSave();
+                closeCompUsageModal();
+                showToast('대체휴무 사용이 Firebase에 등록되었습니다.');
+                renderLeaveDashboard();
+                if (currentUser && ['admin', 'super_admin'].includes(currentUser.role)) renderAdminLeaveUsed();
+            } catch (err) {
+                leaveUsedRecords = leaveUsedRecords.filter(r => r.id !== newRec.id);
+                console.error('대체휴무 사용 등록 실패:', err);
+                showToast(`대체휴무 사용 등록 실패 [${err.code || 'error'}]: ${err.message || 'Firebase 저장 오류'}`);
+            }
         }
 
-        function cancelUsedLeave(usedId) {
-            const idx = leaveUsedRecords.findIndex(r => r.id === usedId);
-            if (idx === -1) return;
+        async function cancelUsedLeave(usedId) {
+            const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
+            if (!isAdmin) { showToast('대체휴무 사용 취소는 관리자 대시보드에서만 가능합니다.'); return; }
+            const record = leaveUsedRecords.find(r => String(r.id) === String(usedId));
+            if (!record) { showToast('취소할 사용 내역을 찾을 수 없습니다.'); return; }
+            if (!confirm(`${record.user} 회원의 대체휴무 사용 ${record.days}일을 취소하시겠습니까?`)) return;
 
-            leaveUsedRecords.splice(idx, 1);
-            saveToLocalStorage();
-            showToast('대체휴무 사용이 취소되었습니다.');
-            renderLeaveDashboard();
+            try {
+                if (!firebaseDb || !firestoreDataReady) throw new Error('Firebase 연결이 준비되지 않았습니다.');
+                const docId = record._docId || firestoreDocId(record, 'used-leave');
+                await firebaseDb.collection('leave_used').doc(docId).delete();
+                leaveUsedRecords = leaveUsedRecords.filter(r => String(r.id) !== String(usedId));
+                saveToLocalStorage(false);
+                queueFirestoreSave();
+                showToast('대체휴무 사용 내역이 Firebase에서 삭제되었습니다.');
+                renderLeaveDashboard();
+                renderAdminLeaveUsed();
+                renderCompanyLeaveLiabilityTable();
+            } catch (err) {
+                console.error('대체휴무 사용 취소 실패:', err);
+                showToast(`대체휴무 사용 삭제 실패 [${err.code || 'error'}]: ${err.message || 'Firebase 삭제 오류'}`);
+            }
         }
 
         // ===================== 공지사항 관리 =====================
@@ -6761,7 +6787,7 @@
                     <td class="py-2.5 px-3 text-slate-600">${r.reason}</td>
                     <td class="py-2.5 px-3 text-center text-orange-600 font-bold font-mono">-${r.days}일</td>
                     <td class="py-2.5 px-3 text-center">
-                        <button onclick="cancelUsedLeave('${r.id}'); renderAdminLeaveUsed(); renderCompanyLeaveLiabilityTable();" class="px-2 py-0.5 text-[11px] bg-red-50 hover:bg-red-100 text-red-600 rounded transition border border-red-200">
+                        <button onclick="cancelUsedLeave('${r.id}')" class="px-2 py-0.5 text-[11px] bg-red-50 hover:bg-red-100 text-red-600 rounded transition border border-red-200">
                             사용 취소
                         </button>
                     </td>
