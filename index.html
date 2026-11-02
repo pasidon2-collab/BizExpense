@@ -2576,8 +2576,16 @@
 
         function getCurrencyRateAgainstKRW(code) {
             if (code === 'KRW') return 1.00;
-            const preset = getExtendedWorldCurrencies().find(c => c.code === code);
-            return preset ? (preset.rate || 1357.75) : 1357.75;
+
+            // 사용자가 추가하거나 Firebase에서 불러온 통화의 환율을 우선 사용
+            const active = Array.isArray(activeOverseasCurrencies)
+                ? activeOverseasCurrencies.find(c => String(c.code).toUpperCase() === String(code).toUpperCase())
+                : null;
+            const preset = getExtendedWorldCurrencies().find(c =>
+                String(c.code).toUpperCase() === String(code).toUpperCase()
+            );
+            const rate = Number(active?.rate) || Number(preset?.rate);
+            return Number.isFinite(rate) && rate > 0 ? rate : null;
         }
 
         function handleCrossCalcCurrencyChange() {
@@ -4227,8 +4235,12 @@
                 }
 
                 if (oldBaseCur && oldBaseCur !== cur && Array.isArray(expenseRowDataList)) {
-                    const oldBaseRate = Math.max(0.000001, Number(getCurrencyRateAgainstKRW(oldBaseCur)) || 1);
-                    const newBaseRate = Math.max(0.000001, Number(getCurrencyRateAgainstKRW(cur)) || 1);
+                    const oldBaseRate = Number(getCurrencyRateAgainstKRW(oldBaseCur));
+                    const newBaseRate = Number(getCurrencyRateAgainstKRW(cur));
+                    if (!oldBaseRate || !newBaseRate) {
+                        showToast('환율 정보가 없어 금액을 환산할 수 없습니다. 통화별 환율을 먼저 확인해 주세요.');
+                        return;
+                    }
 
                     expenseRowDataList.forEach(day => {
                         if (!day) return;
@@ -4243,11 +4255,11 @@
                             }
 
                             const sourceCur = expense.currency || day.currency || oldBaseCur;
-                            const sourceRate = Math.max(
-                                0.000001,
-                                Number(getCurrencyRateAgainstKRW(sourceCur)) ||
-                                    (sourceCur === oldBaseCur ? oldBaseRate : 1)
-                            );
+                            const sourceRate = Number(getCurrencyRateAgainstKRW(sourceCur));
+                            if (!sourceRate) {
+                                showToast(`${sourceCur} 환율 정보가 없어 해당 지출을 환산하지 못했습니다.`);
+                                return;
+                            }
 
                             // 금액이 입력된 항목만 환산하고, 금액 유무와 관계없이 통화 표시는 기준통화로 통일합니다.
                             if (Number(expense.amount) > 0) {
@@ -4299,10 +4311,16 @@
                 calcOverseasAdvanceExchange();
             }
 
-            // 행 통화 기본값 동기화
+            // 기준통화 변경 시 모든 날짜 행과 모든 결제수단의 세부 지출 통화를 기준통화로 통일
             if (isOverseas && expenseRowDataList.length > 0) {
                 expenseRowDataList.forEach(r => {
-                    if (!r.currency) r.currency = cur;
+                    if (!r) return;
+                    r.currency = cur;
+                    if (!r.expenses) r.expenses = createEmptyCategoryData();
+                    ['breakfast', 'lunch', 'dinner', 'lodging', 'transport', 'other'].forEach(category => {
+                        const expense = r.expenses[category];
+                        if (expense) expense.currency = cur;
+                    });
                 });
             }
 
