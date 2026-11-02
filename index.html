@@ -4150,9 +4150,40 @@
             lucide.createIcons();
         }
 
+        // 기준통화 변경 전 값을 기억해 두어 세부 지출금액을 새 기준통화로 환산합니다.
+        let lastSelectedOverseasBaseCurrency = null;
+
         function handleCurrencyChange() {
             const isOverseas = document.getElementById('form-trip-type').value === 'overseas';
             const cur = isOverseas ? (document.getElementById('form-currency').value || 'USD') : 'KRW';
+
+            // 현재 화면의 입력값을 먼저 데이터에 반영한 뒤, 기준통화 변경 시 모든 날짜/결제수단의 금액을 환산합니다.
+            if (isOverseas) {
+                saveCurrentRenderedRowsData();
+                const oldBaseCur = lastSelectedOverseasBaseCurrency;
+                if (oldBaseCur && oldBaseCur !== cur && Array.isArray(expenseRowDataList)) {
+                    const oldBaseRate = Math.max(0.000001, parseFloat(document.getElementById('form-exchange-rate')?.value) || getCurrencyRateAgainstKRW(oldBaseCur));
+                    const newBaseRate = Math.max(0.000001, getCurrencyRateAgainstKRW(cur));
+                    expenseRowDataList.forEach(day => {
+                        if (!day || !day.expenses) return;
+                        ['breakfast', 'lunch', 'dinner', 'lodging', 'transport', 'other'].forEach(category => {
+                            const expense = day.expenses[category];
+                            if (!expense || !(Number(expense.amount) > 0)) return;
+                            const sourceCur = expense.currency || day.currency || oldBaseCur;
+                            const sourceRate = sourceCur === oldBaseCur
+                                ? oldBaseRate
+                                : getCurrencyRateAgainstKRW(sourceCur);
+                            const converted = Number(expense.amount) * sourceRate / newBaseRate;
+                            expense.amount = Math.round((converted + Number.EPSILON) * 100) / 100;
+                            expense.currency = cur;
+                        });
+                        day.currency = cur;
+                    });
+                }
+                lastSelectedOverseasBaseCurrency = cur;
+            } else {
+                lastSelectedOverseasBaseCurrency = null;
+            }
             const advanceUnitEl = document.getElementById('cash-advance-unit-label');
             const localUnitLabel = document.getElementById('advance-local-unit-label');
             if (advanceUnitEl) advanceUnitEl.textContent = cur;
