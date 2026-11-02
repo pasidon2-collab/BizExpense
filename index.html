@@ -2920,22 +2920,98 @@
             await firebaseDb.collection('claims').doc(docId).delete();
         }
 
+        // 정산서에 저장된 날짜 형식(YYYY-MM-DD, YYYY.MM.DD, ISO timestamp 등)을
+        // 한국 날짜 문자열로 통일합니다. 날짜에 시간이 붙어 있어도 요일 판정이 흔들리지 않게 합니다.
+        function normalizeClaimWorkDate(value) {
+            if (!value) return '';
+            if (typeof value === 'object' && value.seconds) {
+                const d = new Date(value.seconds * 1000);
+                return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+            }
+            const raw = String(value).trim();
+            const m = raw.match(/(\d{4})[-./년](\d{1,2})[-./월](\d{1,2})/);
+            if (m) return `${m[1]}-${String(Number(m[2])).padStart(2,'0')}-${String(Number(m[3])).padStart(2,'0')}`;
+            return '';
+        }
+
+        // 실제 정산 상세 항목의 날짜를 우선 사용합니다. 예전 데이터 호환을 위해
+        // items의 date/workDate/expenseDate 필드도 인식하고 중복 날짜는 한 번만 계산합니다.
+        function getClaimWorkDates(claim) {
+            const dates = new Set();
+            (claim && Array.isArray(claim.items) ? claim.items : []).forEach(item => {
+                const date = normalizeClaimWorkDate(item && (item.date || item.workDate || item.expenseDate || item.tripDate));
+                if (date) dates.add(date);
+            });
+            return [...dates].sort();
+        }
+
+        function sameEmployeeName(a, b) {
+            const clean = v => String(v || '').replace(/\s+/g, '').replace(/[()（）\[\]【】]/g, '').trim();
+            return clean(a) !== '' && clean(a) === clean(b);
+        }
+
+        // 주말·공휴일 출장에서 자동 발생한 대체휴무를 직원 UID별 Firestore 문서로 만듭니다.
+        // 화면 표시용 leaveEarnedRecords와 별도로, Firebase 저장용 문서를 정산서에서 재생성합니다.
+        function buildAutomaticEarnedLeaveDocs(claims) {
+            const docs = [];
+            const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
+            (claims || []).forEach(claim => {
+                const travelers = parseTravelerList(String(claim.empName || ''));
+                const workDates = getClaimWorkDates(claim);
+                workDates.forEach(date => {
+                    const holidayInfo = isKoreanHolidayOrWeekend(date);
+                    if (!holidayInfo.isWeekend && !holidayInfo.isLegalHoliday) return;
+                    const reason = holidayInfo.isLegalHoliday
+                        ? `공휴일 출장 (${holidayInfo.holidayName})` : '주말 출장 근로';
+                    travelers.forEach(traveler => {
+                        const matched = (registeredUsers || []).filter(u => u && u.uid && u.status === 'approved' && String(u.name || '').trim() === String(traveler).trim());
+                        let ownerUids = matched.map(u => u.uid);
+                        // 직원 본인이 작성한 단독 출장 정산서는 출장자 이름 표기 차이가 있어도
+                        // 정산서 소유 UID를 본인에게 연결합니다.
+                        if (currentUser && (sameEmployeeName(traveler, currentUser.name) ||
+                            (travelers.length === 1 && claim.ownerUid === currentUser.uid))) {
+                            ownerUids.push(currentUser.uid);
+                        }
+                        if (claim.ownerUid && travelers.length === 1 && sameEmployeeName(traveler, currentUser && currentUser.name)) {
+                            ownerUids.push(claim.ownerUid);
+                        }
+                        if (Array.isArray(claim.ownerUids)) ownerUids = ownerUids.filter(uid => claim.ownerUids.includes(uid)).concat(
+                            claim.ownerUids.filter(uid => ownerUids.includes(uid))
+                        );
+                        if (!ownerUids.length && travelers.length === 1 && claim.ownerUid) ownerUids = [claim.ownerUid];
+                        [...new Set(ownerUids)].forEach(uid => {
+                            if (!isAdmin && uid !== currentUser.uid) return;
+                            const id = `EARN-${claim.id}-${date}-${uid}`;
+                            docs.push({
+                                id, claimId: claim.id, ownerUid: uid, user: traveler,
+                                date, days: 1.5, reason, isManual: false,
+                                createdByUid: claim.ownerUid || currentUser.uid
+                            });
+                        });
+                    });
+                });
+            });
+            return docs;
+        }
+
         async function persistBusinessDataToFirestore() {
             if (!firebaseDb || !currentUser || !firestoreDataReady) return;
             const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
-            // 일반 직원은 본인 소유 정산/휴가사용 데이터만 저장합니다.
-            const ownClaims = claimsData.filter(c => c.ownerUid === currentUser.uid || c.uid === currentUser.uid);
+            const ownClaims = claimsData.filter(c => c.ownerUid === currentUser.uid || c.uid === currentUser.uid || (Array.isArray(c.ownerUids) && c.ownerUids.includes(currentUser.uid)));
             const ownUsedLeaves = leaveUsedRecords.filter(r => r.ownerUid === currentUser.uid);
+            const automaticEarned = buildAutomaticEarnedLeaveDocs(isAdmin ? claimsData : ownClaims);
+            const ownManualEarned = manualEarnedLeaves.filter(r => r.ownerUid === currentUser.uid);
             if (isAdmin) {
                 await writeArrayToFirestore('claims', claimsData, 'claim');
                 await writeArrayToFirestore('leave_used', leaveUsedRecords, 'used-leave');
-                await writeArrayToFirestore('leave_earned', manualEarnedLeaves, 'earned-leave');
+                await writeArrayToFirestore('leave_earned', [...manualEarnedLeaves, ...automaticEarned], 'earned-leave');
                 await writeArrayToFirestore('notices', noticesData, 'notice');
                 const deptRecords = companyDepartments.map(name => ({ id: name, name }));
                 await writeArrayToFirestore('departments', deptRecords, 'department');
             } else {
                 await writeArrayToFirestore('claims', ownClaims, 'claim');
                 await writeArrayToFirestore('leave_used', ownUsedLeaves, 'used-leave');
+                await writeArrayToFirestore('leave_earned', [...ownManualEarned, ...automaticEarned], 'earned-leave');
             }
         }
 
@@ -3022,7 +3098,7 @@
                     localStorage.setItem('biz_firestore_migration_v1', 'done');
                     claimsData = cloudClaims;
                     leaveUsedRecords = cloudUsed;
-                    manualEarnedLeaves = cloudEarned;
+                    manualEarnedLeaves = cloudEarned.filter(r => r.isManual !== false);
                     noticesData = cloudNotices;
                     if (cloudDepartments.length) companyDepartments = cloudDepartments;
                     // 기존 Firestore 정산서 중 소유자 정보가 없는 건은 출장자 이름과 승인 회원을 대조해 UID를 보완합니다.
@@ -3042,7 +3118,7 @@
                     claimsData = cloudClaims.filter(c => c.ownerUid === currentUser.uid ||
                         (Array.isArray(c.ownerUids) && c.ownerUids.includes(currentUser.uid)));
                     leaveUsedRecords = cloudUsed.filter(r => r.ownerUid === currentUser.uid || r.user === currentUser.name);
-                    manualEarnedLeaves = cloudEarned.filter(r => r.ownerUid === currentUser.uid || r.user === currentUser.name);
+                    manualEarnedLeaves = cloudEarned.filter(r => r.isManual !== false && (r.ownerUid === currentUser.uid || r.user === currentUser.name));
                     noticesData = cloudNotices;
                     if (cloudDepartments.length) companyDepartments = cloudDepartments;
                 }
@@ -3050,6 +3126,8 @@
                 firestoreDataReady = true;
                 updateAllDepartmentSelects();
                 syncLeaveRecordsFromClaims();
+                // 로그인 시 기존 정산서에서 계산된 자동 대체휴무도 Firestore에 누락 없이 반영합니다.
+                queueFirestoreSave();
                 renderClaimsTable();
                 renderLeaveDashboard();
                 renderNoticeList();
@@ -4532,8 +4610,10 @@
                 showToast(`출장비 정산서[${newClaimId}]가 성공적으로 등록되었습니다.`);
             }
 
-            saveToLocalStorage();
+            saveToLocalStorage(false);
             syncLeaveRecordsFromClaims();
+            // 정산서 저장 직후 주말·공휴일 자동 대체휴무도 Firestore에 즉시 동기화합니다.
+            queueFirestoreSave();
             switchTab('claims-list');
         }
 
@@ -5508,12 +5588,9 @@
                 const travelers = parseTravelerList(c.empName);
                 if (travelers.length === 0) travelers.push('사원');
 
-                const dateMap = {};
-                (c.items || []).forEach(it => {
-                    if (it.date && !dateMap[it.date]) dateMap[it.date] = true;
-                });
+                const workDates = getClaimWorkDates(c);
 
-                Object.keys(dateMap).forEach(dStr => {
+                workDates.forEach(dStr => {
                     const offInfo = isKoreanHolidayOrWeekend(dStr);
                     if (offInfo.isWeekend || offInfo.isLegalHoliday) {
                         const reasonText = offInfo.isLegalHoliday ? `공휴일 출장 (${offInfo.holidayName})` : '주말 출장 근로';
@@ -5525,6 +5602,7 @@
                                 date: dStr,
                                 days: 1.5,
                                 reason: reasonText,
+                                ownerUid: (c.ownerUid && travelers.length === 1) ? c.ownerUid : '',
                                 isManual: false
                             });
                         });
@@ -5732,8 +5810,9 @@
                 return;
             }
 
+            const targetProfile = (registeredUsers || []).find(u => u && String(u.name || '').trim() === String(user).trim() && u.uid);
             const newRec = {
-                ownerUid: currentUser ? currentUser.uid : '',
+                ownerUid: targetProfile ? targetProfile.uid : (currentUser ? currentUser.uid : ''),
                 createdByUid: currentUser ? currentUser.uid : '',
                 id: `MANUAL-${Date.now()}`,
                 user,
