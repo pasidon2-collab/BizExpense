@@ -52,6 +52,13 @@
             return "bizuser-" + hex + "@bizexpense-login.com";
         }
 
+        function normalizeUserRole(role) {
+            const value = String(role || 'user').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            if (['super_admin', 'superadmin', '최고관리자'].includes(value)) return 'super_admin';
+            if (['admin', 'administrator', '관리자'].includes(value)) return 'admin';
+            return 'user';
+        }
+
         async function loadFirebaseProfile(authUser) {
             if (!firebaseDb || !authUser) throw new Error("Firebase 연결을 확인할 수 없습니다.");
             const snap = await firebaseDb.collection("user").doc(authUser.uid).get();
@@ -178,11 +185,11 @@
             font-family: 'JetBrains Mono', monospace;
             font-variant-numeric: tabular-nums;
         }
-
-        /* 역할별 사이드바를 CSS에서도 강제 분리하여 Tailwind/인라인 스타일 충돌 방지 */
+        /* 관리자 화면은 직원 메뉴를 제거하고 관리자 메뉴만 좌측에 고정 표시 */
         body.admin-mode #employee-menu-items { display: none !important; }
-        body.admin-mode #admin-sidebar-menu { display: block !important; }
+        body.admin-mode #admin-sidebar-menu { display: flex !important; flex-direction: column; }
         body:not(.admin-mode) #admin-sidebar-menu { display: none !important; }
+        body.admin-mode #employee-sidebar { display: block !important; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
@@ -3288,8 +3295,8 @@
             const normalizedRole = currentUser ? normalizeUserRole(currentUser.role) : 'user';
             const isAdmin = ['admin', 'super_admin'].includes(normalizedRole);
             const isSuperAdmin = normalizedRole === 'super_admin';
-            const compactAdmin = false;
             document.body.classList.toggle('admin-mode', isAdmin);
+            const compactAdmin = false;
             const setVisible = (el, visible) => {
                 if (!el) return;
                 el.classList.toggle('hidden', !visible);
@@ -3308,7 +3315,7 @@
             }
             if (adminSidebarMenu) {
                 adminSidebarMenu.classList.toggle('hidden', !isAdmin);
-                adminSidebarMenu.style.setProperty('display', isAdmin ? 'block' : 'none', 'important');
+                adminSidebarMenu.style.setProperty('display', isAdmin ? 'flex' : 'none', 'important');
             }
             if (layout) {
                 layout.classList.toggle('max-w-6xl', compactAdmin);
@@ -3522,7 +3529,7 @@
         }
 
         function switchTab(tabId) {
-            const role = currentUser ? currentUser.role : 'user';
+            const role = currentUser ? normalizeUserRole(currentUser.role) : 'user';
             const isAdmin = ['admin', 'super_admin'].includes(role);
             const isSuperAdmin = role === 'super_admin';
 
