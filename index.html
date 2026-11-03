@@ -302,6 +302,7 @@
         <!-- 좌측 사이드바 메뉴 -->
         <aside id="employee-sidebar" class="w-full md:w-52 shrink-0 space-y-2 no-print">
             <div class="bg-white rounded-xl shadow-xs border border-slate-200/90 p-2 space-y-1 sticky top-20">
+                <div id="employee-menu-items">
                 <div class="px-2.5 py-1.5 text-[11px] font-bold text-slate-400 uppercase tracking-wider">메뉴 관리</div>
                 <button onclick="prepareNewClaimForm()" id="nav-new-claim" class="w-full flex items-center space-x-2.5 px-3 py-2.5 text-xs font-bold rounded-lg text-blue-700 bg-blue-50/80 border-l-3 border-blue-600 transition shadow-2xs">
                     <i data-lucide="plus-circle" class="w-4 h-4 shrink-0 text-blue-600"></i>
@@ -321,6 +322,7 @@
                     <i data-lucide="calendar-clock" class="w-4 h-4 shrink-0 text-emerald-600"></i>
                     <span>대체휴무 관리</span>
                 </button>
+                </div>
                 <!-- 관리자 대시보드 탭 -->
                 <button onclick="switchTab('admin-dashboard')" id="nav-admin" style="display:none;" class="hidden w-full flex items-center space-x-2.5 px-3 py-2.5 text-xs font-medium rounded-lg text-purple-700 hover:bg-purple-50 transition border-l-3 border-transparent">
                     <i data-lucide="shield-check" class="w-4 h-4 text-purple-600 shrink-0"></i>
@@ -3277,6 +3279,7 @@
             const superKakaoPanel = document.getElementById('super-admin-kakao-panel');
             const superPwdPanel = document.getElementById('super-admin-pwd-panel');
             const adminSidebarMenu = document.getElementById('admin-sidebar-menu');
+            const employeeMenuItems = document.getElementById('employee-menu-items');
             const isAdmin = !!currentUser && ['admin', 'super_admin'].includes(currentUser.role);
             const isSuperAdmin = !!currentUser && currentUser.role === 'super_admin';
             const compactAdmin = false;
@@ -3291,7 +3294,15 @@
                 sidebar.classList.remove('hidden');
                 sidebar.style.display = '';
             }
-            if (adminSidebarMenu) adminSidebarMenu.classList.toggle('hidden', !isAdmin);
+            // 관리자/최고관리자는 직원용 메뉴 묶음을 완전히 숨기고 관리자 메뉴만 표시
+            if (employeeMenuItems) {
+                employeeMenuItems.classList.toggle('hidden', isAdmin);
+                employeeMenuItems.style.display = isAdmin ? 'none' : 'block';
+            }
+            if (adminSidebarMenu) {
+                adminSidebarMenu.classList.toggle('hidden', !isAdmin);
+                adminSidebarMenu.style.display = isAdmin ? 'block' : 'none';
+            }
             if (layout) {
                 layout.classList.toggle('max-w-6xl', compactAdmin);
                 layout.classList.toggle('max-w-7xl', !compactAdmin);
