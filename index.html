@@ -239,7 +239,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">비밀번호 <span class="text-red-500">*</span></label>
-                    <input type="password" id="signup-password" required minlength="4" autocomplete="new-password" placeholder="4자리 이상 입력하세요" class="w-full px-3 py-3 text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                    <input type="password" id="signup-password" required minlength="4" autocomplete="new-password" placeholder="6자리 이상 입력하세요" class="w-full px-3 py-3 text-base border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none">
                 </div>
                 <div>
                     <label class="block text-sm font-semibold text-slate-700 mb-1">비밀번호 확인 <span class="text-red-500">*</span></label>
@@ -1533,8 +1533,8 @@
             </div>
             <form onsubmit="handleCompUsageSubmit(event)" class="space-y-3">
                 <div>
-                    <label class="block text-xs font-semibold text-slate-700 mb-1">사용자</label>
-                    <input type="text" id="use-leave-user" readonly class="w-full px-3 py-1.5 text-xs bg-slate-100 border border-slate-300 rounded-lg text-slate-600 font-medium">
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">사용자 <span class="text-red-500">*</span></label>
+                    <select id="use-leave-user" required class="w-full px-3 py-1.5 text-xs border border-slate-300 rounded-lg bg-white text-slate-700 font-medium"></select>
                 </div>
                 <div>
                     <label class="block text-xs font-semibold text-slate-700 mb-1">사용 희망 일자 <span class="text-red-500">*</span></label>
@@ -6196,8 +6196,25 @@
 
         function openCompUsageModal() {
             if (!currentUser) return;
-            document.getElementById('use-leave-user').value = currentUser.name;
+            const isAdmin = ['admin', 'super_admin'].includes(currentUser.role);
+            const userSelect = document.getElementById('use-leave-user');
+            if (isAdmin) {
+                const users = (registeredUsers || []).filter(u => u && u.uid && u.name);
+                userSelect.innerHTML = users.map(u => `<option value="${String(u.uid)}">${String(u.name)} (${String(u.dept || '')})</option>`).join('');
+                if (!users.length) {
+                    showToast('사용자를 불러오지 못했습니다. 회원 목록을 새로고침한 뒤 다시 시도해주세요.');
+                    return;
+                }
+                const own = users.find(u => String(u.uid) === String(currentUser.uid));
+                userSelect.value = own ? String(own.uid) : String(users[0].uid);
+                userSelect.disabled = false;
+            } else {
+                userSelect.innerHTML = `<option value="${String(currentUser.uid)}">${String(currentUser.name)}</option>`;
+                userSelect.value = String(currentUser.uid);
+                userSelect.disabled = true;
+            }
             document.getElementById('use-leave-date').value = new Date().toISOString().split('T')[0];
+            document.getElementById('use-leave-days').value = '1.0';
             document.getElementById('use-leave-reason').value = '';
 
             const modal = document.getElementById('use-leave-modal');
@@ -6213,24 +6230,28 @@
 
         async function handleCompUsageSubmit(e) {
             e.preventDefault();
-            const user = document.getElementById('use-leave-user').value;
+            const selectedUid = document.getElementById('use-leave-user').value;
             const date = document.getElementById('use-leave-date').value;
             const days = parseFloat(document.getElementById('use-leave-days').value) || 1.0;
             const reason = document.getElementById('use-leave-reason').value.trim();
+            const isAdmin = currentUser && ['admin', 'super_admin'].includes(currentUser.role);
+            const targetUser = isAdmin
+                ? (registeredUsers || []).find(u => u && String(u.uid) === String(selectedUid))
+                : currentUser;
 
-            if (!date || !reason) {
-                showToast('사용 일자와 사유를 입력해주세요.');
+            if (!currentUser || !targetUser || !date || !reason || ![0.5, 1].includes(days)) {
+                showToast('대상 사용자, 사용 일자, 사용 단위와 사유를 확인해주세요.');
                 return;
             }
 
             const newRec = {
-                ownerUid: currentUser.uid,
+                ownerUid: targetUser.uid,
                 createdByUid: currentUser.uid,
                 id: `USED-${Date.now()}`,
-                user: currentUser.name,
+                user: targetUser.name,
                 date,
                 days,
-                reason,
+                reason: isAdmin ? `[관리자 수동등록] ${reason}` : reason,
                 approved: true
             };
 
