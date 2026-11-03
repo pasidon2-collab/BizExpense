@@ -6783,7 +6783,7 @@
             modal.style.display = 'none';
         }
 
-        function handleSaveUserEdit(e) {
+        async function handleSaveUserEdit(e) {
             e.preventDefault();
             const origName = document.getElementById('edit-user-original-name').value;
             const newName = document.getElementById('edit-user-name').value.trim();
@@ -6794,31 +6794,56 @@
             const newPassword = document.getElementById('edit-user-password').value;
 
             const idx = registeredUsers.findIndex(u => u.name === origName);
-            if (idx !== -1) {
-                if (registeredUsers.some((u, i) => i !== idx && u.name === newName)) {
-                    showToast('같은 이름의 회원이 이미 등록되어 있습니다.');
-                    return;
-                }
-                const updatedUser = { ...registeredUsers[idx], name: newName, empNo, dept, status, role };
+            if (idx === -1) return;
+            if (registeredUsers.some((u, i) => i !== idx && u.name === newName)) {
+                showToast('같은 이름의 회원이 이미 등록되어 있습니다.');
+                return;
+            }
+            const targetUser = registeredUsers[idx];
+            if (!targetUser.uid) {
+                showToast('Firebase UID를 찾을 수 없습니다. 회원 목록을 새로고침해주세요.');
+                return;
+            }
+            if (newPassword && newPassword.length < 6) {
+                showToast('Firebase 비밀번호는 6자리 이상 입력해주세요.');
+                return;
+            }
+
+            const updatedUser = { ...targetUser, name: newName, empNo, dept, status, role };
+            try {
+                // 권한/승인/부서 정보는 로컬에만 저장하면 다음 로그인 시 사라지므로
+                // 실제 인증 프로필 문서(user/{uid})에 먼저 반영합니다.
+                await firebaseDb.collection('user').doc(targetUser.uid).update({
+                    name: newName,
+                    empNo: empNo,
+                    department: dept,
+                    dept: dept,
+                    status: status,
+                    role: role,
+                    updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                // Firebase Authentication 비밀번호도 실제로 변경합니다.
+                // 다른 사용자의 비밀번호는 관리자 SDK 없이 클라이언트에서 변경할 수 없으므로
+                // 현재 로그인한 본인 계정에 대해서만 허용합니다.
                 if (newPassword) {
-                    if (newPassword.length < 4) { showToast('비밀번호는 4자리 이상 입력해주세요.'); return; }
-                    hashUserPassword(newPassword).then(hash => {
-                        updatedUser.passwordHash = hash;
-                        registeredUsers[idx] = updatedUser;
-                        saveToLocalStorage();
-                        closeAdminUserModal();
-                        showToast('회원 정보와 비밀번호가 수정되었습니다.');
-                        renderAdminUserDeptTabs(); renderAdminUsersTable(); initAdminUserSelectOptions();
-                    }).catch(err => showToast(err.message));
-                    return;
+                    if (!firebaseAuth || !firebaseAuth.currentUser || firebaseAuth.currentUser.uid !== targetUser.uid) {
+                        showToast('다른 회원의 비밀번호는 이 화면에서 변경할 수 없습니다. 해당 회원이 직접 비밀번호를 변경해야 합니다.');
+                        return;
+                    }
+                    await firebaseAuth.currentUser.updatePassword(newPassword);
                 }
+
                 registeredUsers[idx] = updatedUser;
                 saveToLocalStorage();
                 closeAdminUserModal();
-                showToast('회원 정보가 수정되었습니다.');
+                showToast('회원 정보와 권한이 Firestore에 저장되었습니다.');
                 renderAdminUserDeptTabs();
                 renderAdminUsersTable();
                 initAdminUserSelectOptions();
+            } catch (err) {
+                console.error('회원 정보 Firestore 저장 실패:', err);
+                showToast('회원 정보 저장 실패: ' + (err.message || 'Firestore 권한을 확인해주세요.'));
             }
         }
 
