@@ -68,7 +68,7 @@
                 email: authUser.email,
                 empNo: profile.empNo || "",
                 dept: profile.department || profile.dept || "",
-                role: profile.role || "user",
+                role: normalizeUserRole(profile.role),
                 status: profile.status,
                 createdAt: profile.createdAt || "",
                 lastLoginAt: new Date().toISOString()
@@ -178,6 +178,11 @@
             font-family: 'JetBrains Mono', monospace;
             font-variant-numeric: tabular-nums;
         }
+
+        /* 역할별 사이드바를 CSS에서도 강제 분리하여 Tailwind/인라인 스타일 충돌 방지 */
+        body.admin-mode #employee-menu-items { display: none !important; }
+        body.admin-mode #admin-sidebar-menu { display: block !important; }
+        body:not(.admin-mode) #admin-sidebar-menu { display: none !important; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased flex flex-col min-h-screen">
@@ -3280,9 +3285,11 @@
             const superPwdPanel = document.getElementById('super-admin-pwd-panel');
             const adminSidebarMenu = document.getElementById('admin-sidebar-menu');
             const employeeMenuItems = document.getElementById('employee-menu-items');
-            const isAdmin = !!currentUser && ['admin', 'super_admin'].includes(currentUser.role);
-            const isSuperAdmin = !!currentUser && currentUser.role === 'super_admin';
+            const normalizedRole = currentUser ? normalizeUserRole(currentUser.role) : 'user';
+            const isAdmin = ['admin', 'super_admin'].includes(normalizedRole);
+            const isSuperAdmin = normalizedRole === 'super_admin';
             const compactAdmin = false;
+            document.body.classList.toggle('admin-mode', isAdmin);
             const setVisible = (el, visible) => {
                 if (!el) return;
                 el.classList.toggle('hidden', !visible);
@@ -3297,11 +3304,11 @@
             // 관리자/최고관리자는 직원용 메뉴 묶음을 완전히 숨기고 관리자 메뉴만 표시
             if (employeeMenuItems) {
                 employeeMenuItems.classList.toggle('hidden', isAdmin);
-                employeeMenuItems.style.display = isAdmin ? 'none' : 'block';
+                employeeMenuItems.style.setProperty('display', isAdmin ? 'none' : 'block', 'important');
             }
             if (adminSidebarMenu) {
                 adminSidebarMenu.classList.toggle('hidden', !isAdmin);
-                adminSidebarMenu.style.display = isAdmin ? 'block' : 'none';
+                adminSidebarMenu.style.setProperty('display', isAdmin ? 'block' : 'none', 'important');
             }
             if (layout) {
                 layout.classList.toggle('max-w-6xl', compactAdmin);
