@@ -1251,6 +1251,11 @@
                         </div>
 
                         <div id="admin-subtab-content-used" class="hidden space-y-4">
+                            <div class="flex justify-end">
+                                <button type="button" onclick="openCompUsageModal()" class="px-3.5 py-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg flex items-center space-x-1.5 shadow transition">
+                                    <i data-lucide="plus" class="w-4 h-4"></i><span>대체휴무 사용 내역 추가</span>
+                                </button>
+                            </div>
                             <div class="overflow-x-auto min-h-[290px]">
                                 <table class="w-full text-xs text-left">
                                     <thead class="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
@@ -6284,7 +6289,10 @@
                 closeCompUsageModal();
                 showToast('대체휴무 사용이 Firebase에 등록되었습니다.');
                 renderLeaveDashboard();
-                if (currentUser && ['admin', 'super_admin'].includes(currentUser.role)) renderAdminLeaveUsed();
+                if (currentUser && ['admin', 'super_admin'].includes(currentUser.role)) {
+                    renderAdminLeaveUsed();
+                    renderCompanyLeaveLiabilityTable();
+                }
             } catch (err) {
                 leaveUsedRecords = leaveUsedRecords.filter(r => r.id !== newRec.id);
                 console.error('대체휴무 사용 등록 실패:', err);
