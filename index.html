@@ -2098,102 +2098,15 @@
             '제주': [33.4996, 126.5312]
         };
 
-        const INITIAL_DATA = [
-            {
-                id: 'TRIP-2026-001',
-                tripType: 'domestic',
-                empName: '홍길동, 김철수',
-                empDept: '생산부',
-                purpose: '밀양 스마트팜 기술 점검 및 미팅',
-                location: '밀양',
-                startDate: '2026-10-12',
-                endDate: '2026-10-14',
-                submittedDate: '2026-10-15',
-                cashAdvance: 0,
-                currency: 'KRW',
-                exchangeRate: 1,
-                items: [
-                    { id: 1, date: '2026-10-12', checkIn: '08:30', checkOut: '17:30', payMethod: '법인카드', category: '교통비', desc: '교통비', amount: 84000, notes: 'KTX 밀양역' },
-                    { id: 2, date: '2026-10-12', checkIn: '08:30', checkOut: '17:30', payMethod: '법인카드', category: '숙박', desc: '숙박비', amount: 90000, notes: '호텔' },
-                    { id: 3, date: '2026-10-13', checkIn: '08:30', checkOut: '17:30', payMethod: '현금', category: '중식', desc: '중식 식대', amount: 20000, notes: '현금 식대' },
-                    { id: 4, date: '2026-10-14', checkIn: '08:30', checkOut: '17:30', payMethod: '개인사용', category: '석식', desc: '석식 식대', amount: 25000, notes: '개인 카드 사용' }
-                ],
-                readByAdmin: true
-            },
-            {
-                id: 'TRIP-2026-002',
-                tripType: 'domestic',
-                empName: '홍길동',
-                empDept: '생산부',
-                purpose: '대전 연구소 서버 인프라 정기 점검',
-                location: '대전 유성구',
-                startDate: '2026-10-18',
-                endDate: '2026-10-20',
-                submittedDate: '2026-10-21',
-                cashAdvance: 50000,
-                currency: 'KRW',
-                exchangeRate: 1,
-                items: [
-                    { id: 1, date: '2026-10-18', checkIn: '08:30', checkOut: '17:30', payMethod: '법인카드', category: '교통비', desc: '교통비', amount: 48000, notes: 'SRT' },
-                    { id: 2, date: '2026-10-19', checkIn: '08:30', checkOut: '17:30', payMethod: '현금', category: '조식', desc: '조식 식대', amount: 15000, notes: '' }
-                ],
-                readByAdmin: false
-            },
-            {
-                id: 'TRIP-2026-003',
-                tripType: 'domestic',
-                empName: '김철수',
-                empDept: '영업부',
-                purpose: '부산 벡스코 전시회 부스 운영',
-                location: '부산 해운대구',
-                startDate: '2026-10-22',
-                endDate: '2026-10-24',
-                submittedDate: '2026-10-25',
-                cashAdvance: 0,
-                currency: 'KRW',
-                exchangeRate: 1,
-                items: [
-                    { id: 1, date: '2026-10-22', checkIn: '08:30', checkOut: '17:30', payMethod: '법인카드', category: '교통비', desc: '교통비', amount: 118000, notes: 'KTX' }
-                ],
-                readByAdmin: true
-            },
-            {
-                id: 'TRIP-2026-004',
-                tripType: 'domestic',
-                empName: '홍길동',
-                empDept: '생산부',
-                purpose: '판교 IT 밸리 클라우드 센터 기술 지원',
-                location: '판교',
-                startDate: '2026-10-26',
-                endDate: '2026-10-27',
-                submittedDate: '2026-10-28',
-                cashAdvance: 0,
-                currency: 'KRW',
-                exchangeRate: 1,
-                items: [
-                    { id: 1, date: '2026-10-26', checkIn: '08:30', checkOut: '17:30', payMethod: '법인카드', category: '교통비', desc: '교통비', amount: 15000, notes: '지하철/택시' }
-                ],
-                readByAdmin: true
-            },
-            {
-                id: 'TRIP-2026-005',
-                tripType: 'domestic',
-                empName: '김철수',
-                empDept: '영업부',
-                purpose: '광주 고객사 정기 품질 감사 및 협의',
-                location: '광주',
-                startDate: '2026-10-29',
-                endDate: '2026-10-30',
-                submittedDate: '2026-10-30',
-                cashAdvance: 30000,
-                currency: 'KRW',
-                exchangeRate: 1,
-                items: [
-                    { id: 1, date: '2026-10-29', checkIn: '08:30', checkOut: '17:30', payMethod: '현금', category: '중식', desc: '중식 식대', amount: 18000, notes: '현금영수증' }
-                ],
-                readByAdmin: false
-            }
-        ];
+        // 신규 설치/초기화 시 데모 정산내역을 자동으로 생성하지 않습니다.
+        const INITIAL_DATA = [];
+        const SAMPLE_CLAIM_IDS = new Set([
+            'TRIP-2026-001', 'TRIP-2026-002', 'TRIP-2026-003',
+            'TRIP-2026-004', 'TRIP-2026-005'
+        ]);
+        function isSampleClaim(claim) {
+            return !!claim && SAMPLE_CLAIM_IDS.has(String(claim.id || '').trim());
+        }
 
         let currentUser = null;
         let registeredUsers = [];
@@ -2845,6 +2758,10 @@
             );
         }
 
+        // 인증 상태 이벤트의 비동기 처리 순서를 추적해 로그아웃 뒤 이전 요청이
+        // currentUser를 다시 설정하는 경쟁 상태(race condition)를 방지합니다.
+        let authStateRequestId = 0;
+
         window.onload = function() {
             try {
                 loadLocalStorage();
@@ -2854,17 +2771,31 @@
                 checkAuth();
                 if (firebaseAuth) {
                     firebaseAuth.onAuthStateChanged(async (authUser) => {
+                        const requestId = ++authStateRequestId;
                         if (firebaseSignupInProgress) return;
                         if (!authUser) {
                             currentUser = null;
+                            firestoreDataReady = false;
                             checkAuth();
                             return;
                         }
                         try {
-                            currentUser = await loadFirebaseProfile(authUser);
+                            const profile = await loadFirebaseProfile(authUser);
+                            // 프로필 조회 중 로그아웃했거나 다른 계정으로 바뀌었다면
+                            // 오래된 비동기 결과를 화면에 반영하지 않습니다.
+                            if (requestId !== authStateRequestId ||
+                                !firebaseAuth.currentUser ||
+                                firebaseAuth.currentUser.uid !== authUser.uid) return;
+
+                            currentUser = profile;
                             await loadBusinessDataFromFirestore();
+
+                            if (requestId !== authStateRequestId ||
+                                !firebaseAuth.currentUser ||
+                                firebaseAuth.currentUser.uid !== authUser.uid) return;
                             checkAuth();
                         } catch (profileError) {
+                            if (requestId !== authStateRequestId) return;
                             console.error("Firebase 사용자 정보 확인 실패:", profileError);
                             currentUser = null;
                             try { await firebaseAuth.signOut(); } catch (_) {}
@@ -2914,8 +2845,10 @@
                 }
 
                 const storedClaims = localStorage.getItem('biz_claims');
-                claimsData = storedClaims ? JSON.parse(storedClaims) : INITIAL_DATA;
-                if (!Array.isArray(claimsData)) claimsData = INITIAL_DATA;
+                claimsData = storedClaims ? JSON.parse(storedClaims) : [];
+                if (!Array.isArray(claimsData)) claimsData = [];
+                // 이전 버전에서 브라우저에 저장된 데모 정산내역도 제거합니다.
+                claimsData = claimsData.filter(claim => !isSampleClaim(claim));
 
                 const storedUsedLeaves = localStorage.getItem('biz_used_leaves');
                 leaveUsedRecords = storedUsedLeaves ? JSON.parse(storedUsedLeaves) : [];
@@ -2933,7 +2866,7 @@
             } catch (e) {
                 registeredUsers = DEFAULT_USERS;
                 companyDepartments = DEFAULT_DEPARTMENTS;
-                claimsData = INITIAL_DATA;
+                claimsData = [];
                 leaveUsedRecords = [];
                 manualEarnedLeaves = [];
                 noticesData = [];
@@ -3187,7 +3120,13 @@
                     claimsSnaps = { docs: [...claimMap.values()], empty: claimMap.size === 0 };
                     usedSnap = used; earnedSnap = earned; noticesSnap = notices; departmentsSnap = departments;
                 }
-                let cloudClaims = readRecords(claimsSnaps);
+                // 과거 버전에서 Firestore로 이전된 고정 데모 정산내역을 화면/재저장에서 제외합니다.
+                const sampleDocs = (claimsSnaps.docs || []).filter(doc =>
+                    SAMPLE_CLAIM_IDS.has(String((doc.data() && doc.data().id) || doc.id)));
+                if (isAdmin && sampleDocs.length) {
+                    await Promise.all(sampleDocs.map(doc => doc.ref.delete()));
+                }
+                let cloudClaims = readRecords(claimsSnaps).filter(claim => !isSampleClaim(claim));
                 let cloudUsed = readRecords(usedSnap);
                 let cloudEarned = readRecords(earnedSnap);
                 let cloudNotices = readRecords(noticesSnap);
@@ -3205,7 +3144,7 @@
                     };
                     firestoreDataReady = true;
                     const usersForOwnership = registeredUsers.filter(u => u && u.uid && u.status === 'approved');
-                    const claimsWithOwners = claimsData.map(claim => {
+                    const claimsWithOwners = claimsData.filter(claim => !isSampleClaim(claim)).map(claim => {
                         if (claim.ownerUid || (Array.isArray(claim.ownerUids) && claim.ownerUids.length)) return claim;
                         const travelerNames = parseTravelerList(String(claim.empName || ''));
                         const matchedUids = usersForOwnership
@@ -3511,13 +3450,39 @@
         }
 
         async function handleLogout() {
+            // 진행 중인 인증/데이터 로드 요청을 무효화하여 로그아웃 후 재로그인을 막습니다.
+            ++authStateRequestId;
             currentUser = null;
+            firestoreDataReady = false;
             localStorage.removeItem('biz_session');
-            if (firebaseAuth) {
-                try { await firebaseAuth.signOut(); }
-                catch (err) { console.error("Firebase 로그아웃 실패:", err); }
-            }
             checkAuth();
+
+            if (firebaseAuth) {
+                try {
+                    await firebaseAuth.signOut();
+                    // signOut 완료 후에도 로컬 로그인 흔적이 남지 않도록 재확인합니다.
+                    localStorage.removeItem('biz_session');
+                    currentUser = null;
+                    checkAuth();
+                    showToast('로그아웃되었습니다.');
+                } catch (err) {
+                    console.error("Firebase 로그아웃 실패:", err);
+                    showToast('로그아웃에 실패했습니다. 인터넷 연결을 확인한 뒤 다시 시도해주세요.');
+                    // Firebase 로그아웃이 실패했다면 실제 인증 상태를 임의로 숨기지 않습니다.
+                    if (firebaseAuth.currentUser) {
+                        try {
+                            const profile = await loadFirebaseProfile(firebaseAuth.currentUser);
+                            currentUser = profile;
+                            checkAuth();
+                        } catch (_) {
+                            currentUser = null;
+                            checkAuth();
+                        }
+                    }
+                }
+            } else {
+                showToast('Firebase 인증 연결을 확인할 수 없습니다.');
+            }
         }
 
         function updateUserProfileUI() {
@@ -5584,7 +5549,7 @@
                     if (data.adminPassword) saveAdminPassword(data.adminPassword);
                     if (data.departments && Array.isArray(data.departments)) companyDepartments = data.departments;
                     if (data.users && Array.isArray(data.users)) registeredUsers = data.users;
-                    if (data.claims && Array.isArray(data.claims)) claimsData = data.claims;
+                    if (data.claims && Array.isArray(data.claims)) claimsData = data.claims.filter(claim => !isSampleClaim(claim));
                     if (data.usedLeaves && Array.isArray(data.usedLeaves)) leaveUsedRecords = data.usedLeaves;
                     if (data.manualLeaves && Array.isArray(data.manualLeaves)) manualEarnedLeaves = data.manualLeaves;
 
