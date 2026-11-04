@@ -36,6 +36,8 @@
             if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
             firebaseAuth = firebase.auth();
             firebaseDb = firebase.firestore();
+            // 브라우저(탭)를 닫으면 로그인이 풀리도록 세션 단위로만 로그인을 유지합니다.
+            firebaseAuth.setPersistence(firebase.auth.Auth.Persistence.SESSION).catch(e => console.warn('persistence 설정 실패', e));
         } catch (firebaseInitError) {
             console.error("Firebase 초기화 실패:", firebaseInitError);
         }
@@ -2169,7 +2171,9 @@
                 }
             });
             const nextSeq = String(maxSeq + 1).padStart(3, '0');
-            return `TRIP-${currentYear}-${nextSeq}`;
+            // 직원은 본인 정산서만 내려받으므로 번호가 다른 직원과 겹칠 수 있어 랜덤 접미사를 붙입니다.
+            const suffix = Math.random().toString(36).slice(2, 5);
+            return `TRIP-${currentYear}-${nextSeq}-${suffix}`;
         }
 
         // 사용자가 활성화한 해외 기준 통화 목록 (기본 프리셋)
@@ -2767,6 +2771,7 @@
         // 인증 상태 이벤트의 비동기 처리 순서를 추적해 로그아웃 뒤 이전 요청이
         // currentUser를 다시 설정하는 경쟁 상태(race condition)를 방지합니다.
         let authStateRequestId = 0;
+        let pendingLoginType = null;
 
         window.onload = function() {
             try {
@@ -2785,8 +2790,27 @@
                             checkAuth();
                             return;
                         }
+                        // 이번 탭에서 직접 로그인한 적이 없으면(이전에 남아 있던 로그인 캐시) 자동 로그인을 허용하지 않습니다.
+                        if (!sessionStorage.getItem('biz_login_ok')) {
+                            try { await firebaseAuth.signOut(); } catch (_) {}
+                            return;
+                        }
                         try {
                             const profile = await loadFirebaseProfile(authUser);
+                            // 로그인 탭(직원/관리자)과 계정 권한이 맞는지 확인합니다.
+                            if (pendingLoginType) {
+                                const isAdminRole = ['admin', 'super_admin'].includes(profile.role);
+                                const mismatch = (pendingLoginType === 'admin' && !isAdminRole) ||
+                                                 (pendingLoginType === 'user' && isAdminRole);
+                                const t = pendingLoginType;
+                                pendingLoginType = null;
+                                if (mismatch) {
+                                    sessionStorage.removeItem('biz_login_ok');
+                                    await firebaseAuth.signOut();
+                                    showToast(t === 'admin' ? '관리자 권한이 등록된 계정이 아닙니다.' : '관리자 계정은 관리자 로그인 탭을 이용해주세요.');
+                                    return;
+                                }
+                            }
                             // 프로필 조회 중 로그아웃했거나 다른 계정으로 바뀌었다면
                             // 오래된 비동기 결과를 화면에 반영하지 않습니다.
                             if (requestId !== authStateRequestId ||
@@ -2896,7 +2920,7 @@
         function firestoreDocId(record, fallbackPrefix) {
             const raw = record && (record.id || record.uid);
             return String(raw || (fallbackPrefix + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)))
-                .replace(/[\\/\\.#$[\\]]/g, '_');
+                .replace(/[\\/.#$\[\]]/g, '_');
         }
 
         async function writeArrayToFirestore(collectionName, records, idPrefix) {
@@ -3141,12 +3165,18 @@
                 if (isAdmin) {
                     // 컬렉션별로 비어 있는 경우에만 기존 관리자 브라우저 자료를 해당 컬렉션으로 이전합니다.
                     const sourceSnaps = [claimsSnaps, usedSnap, earnedSnap, noticesSnap, departmentsSnap];
-                    const seedIfEmpty = async (index, collection, records, prefix) => {
-                        if (sourceSnaps[index].empty && records.length) {
-                            await writeArrayToFirestore(collection, records, prefix);
-                            return records;
+                    // 클라우드 컬렉션이 비어 있고 이 PC가 아직 이전하지 않은 경우에만 로컬 자료를 올립니다.
+                    // 그 외에는 항상 Firestore(클라우드) 데이터를 기준으로 사용합니다.
+                    const migrationDone = localStorage.getItem('biz_firestore_migration_v1') === 'done';
+                    const seedIfEmpty = async (index, collection, records, prefix, cloudRecords) => {
+                        if (sourceSnaps[index].empty) {
+                            if (!migrationDone && records.length) {
+                                await writeArrayToFirestore(collection, records, prefix);
+                                return records;
+                            }
+                            return [];
                         }
-                        return records;
+                        return cloudRecords;
                     };
                     firestoreDataReady = true;
                     const usersForOwnership = registeredUsers.filter(u => u && u.uid && u.status === 'approved');
@@ -3158,12 +3188,12 @@
                             .map(u => u.uid);
                         return matchedUids.length ? { ...claim, ownerUids: [...new Set(matchedUids)] } : claim;
                     });
-                    cloudClaims = await seedIfEmpty(0, 'claims', claimsWithOwners, 'claim');
-                    cloudUsed = await seedIfEmpty(1, 'leave_used', leaveUsedRecords, 'used-leave');
-                    cloudEarned = await seedIfEmpty(2, 'leave_earned', manualEarnedLeaves, 'earned-leave');
-                    cloudNotices = await seedIfEmpty(3, 'notices', noticesData, 'notice');
-                    cloudDepartments = await seedIfEmpty(4, 'departments', companyDepartments.map(name => ({ id: name, name })), 'department')
-                        .then(rows => rows.map(d => d.name || d.id).filter(Boolean));
+                    cloudClaims = await seedIfEmpty(0, 'claims', claimsWithOwners, 'claim', cloudClaims);
+                    cloudUsed = await seedIfEmpty(1, 'leave_used', leaveUsedRecords, 'used-leave', cloudUsed);
+                    cloudEarned = await seedIfEmpty(2, 'leave_earned', manualEarnedLeaves, 'earned-leave', cloudEarned);
+                    cloudNotices = await seedIfEmpty(3, 'notices', noticesData, 'notice', cloudNotices);
+                    cloudDepartments = (await seedIfEmpty(4, 'departments', companyDepartments.map(name => ({ id: name, name })), 'department',
+                        readRecords(departmentsSnap))).map(d => d.name || d.id).filter(Boolean);
                     localStorage.setItem('biz_firestore_migration_v1', 'done');
                     claimsData = cloudClaims;
                     leaveUsedRecords = cloudUsed;
@@ -3370,34 +3400,24 @@
             }
             try {
                 const email = firebaseEmailForName(name);
-                const credential = await firebaseAuth.signInWithEmailAndPassword(email, password);
-                const profile = await loadFirebaseProfile(credential.user);
-
-                if (currentLoginType === 'admin' && !['admin', 'super_admin'].includes(profile.role)) {
-                    await firebaseAuth.signOut();
-                    showToast('관리자 권한이 등록된 계정이 아닙니다.');
-                    return;
-                }
-                if (currentLoginType === 'user' && profile.role !== 'user') {
-                    await firebaseAuth.signOut();
-                    showToast('관리자 계정은 관리자 로그인 탭을 이용해주세요.');
-                    return;
-                }
-
-                currentUser = profile;
-                localStorage.setItem('biz_session', JSON.stringify({
-                    uid: profile.uid, name: profile.name, empNo: profile.empNo,
-                    dept: profile.dept, role: profile.role, status: profile.status
-                }));
-                checkAuth();
-                const roleLabel = profile.role === 'super_admin' ? '최고관리자' : profile.role === 'admin' ? '관리자' : '직원';
-                showToast(`${roleLabel} ${profile.name} 님, 로그인되었습니다.`);
-                showNoticePopupIfNeeded();
+                // 직접 로그인한 경우에만 이번 세션에서 로그인 상태를 인정합니다.
+                sessionStorage.setItem('biz_login_ok', '1');
+                pendingLoginType = currentLoginType;
+                await firebaseAuth.signInWithEmailAndPassword(email, password);
+                // 화면 전환과 데이터 로딩은 onAuthStateChanged에서 한 번만 처리합니다.
+                document.getElementById('login-password').value = '';
+                showToast('로그인 중입니다...');
             } catch (err) {
+                sessionStorage.removeItem('biz_login_ok');
+                pendingLoginType = null;
                 console.error("Firebase 로그인 실패:", err);
                 const code = err && err.code;
                 if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found') {
                     showToast('이름 또는 비밀번호가 올바르지 않습니다.');
+                } else if (code === 'auth/network-request-failed') {
+                    showToast('네트워크 연결을 확인해주세요.');
+                } else if (code === 'auth/unauthorized-domain') {
+                    showToast('Firebase 승인된 도메인에 이 주소를 추가해야 합니다.');
                 } else if (code === 'auth/too-many-requests') {
                     showToast('로그인 시도가 많습니다. 잠시 후 다시 시도해주세요.');
                 } else {
@@ -3473,6 +3493,7 @@
             ++authStateRequestId;
             currentUser = null;
             firestoreDataReady = false;
+            sessionStorage.removeItem('biz_login_ok');
             localStorage.removeItem('biz_session');
             checkAuth();
 
@@ -3517,7 +3538,7 @@
             document.getElementById('header-user-dept').textContent = `${empDisplay}${currentUser.dept} ${roleBadgeText}`.trim();
         }
 
-        function changeAdminPassword() {
+        async function changeAdminPassword() {
             if (!currentUser || currentUser.role !== 'super_admin') {
                 showToast('최고관리자만 암호를 변경할 수 있습니다.');
                 return;
@@ -3528,9 +3549,18 @@
                 showToast('변경할 새 암호를 입력해주세요.');
                 return;
             }
-            saveAdminPassword(newPwd);
-            input.value = '';
-            showToast('관리자/최고관리자 로그인 암호가 성공적으로 변경되었습니다.');
+            if (newPwd.length < 6) { showToast('비밀번호는 6자리 이상이어야 합니다.'); return; }
+            try {
+                await firebaseAuth.currentUser.updatePassword(newPwd);
+                input.value = '';
+                showToast('로그인 비밀번호가 변경되었습니다.');
+            } catch (err) {
+                if (err && err.code === 'auth/requires-recent-login') {
+                    showToast('보안을 위해 다시 로그인한 뒤 비밀번호를 변경해주세요.');
+                } else {
+                    showToast('비밀번호 변경 실패: ' + (err.message || err));
+                }
+            }
         }
 
         function switchTab(tabId) {
@@ -6430,10 +6460,19 @@
             lucide.createIcons();
         }
 
-        function deleteNotice(id) {
+        async function deleteNotice(id) {
             const n = noticesData.find(x => x.id === id);
             if (!n) return;
             if (!confirm(`"${n.title}" 공지사항을 삭제하시겠습니까?\n삭제된 공지는 복구할 수 없습니다.`)) return;
+            // 클라우드 삭제를 먼저 완료해야 다른 PC/재로그인 시 공지가 되살아나지 않습니다.
+            try {
+                if (!firebaseDb || !currentUser || !firestoreDataReady) throw new Error('Firebase 연결이 준비되지 않았습니다.');
+                await firebaseDb.collection('notices').doc(n._docId || firestoreDocId(n, 'notice')).delete();
+            } catch (err) {
+                console.error('공지 삭제 실패:', err);
+                showToast('공지 삭제 실패 [' + (err.code || 'error') + ']: ' + (err.message || err));
+                return;
+            }
             noticesData = noticesData.filter(x => x.id !== id);
             saveToLocalStorage();
             if (editingNoticeId === id) {
@@ -6788,11 +6827,19 @@
             modal.style.display = 'none';
         }
 
-        function confirmDeleteUser() {
+        async function confirmDeleteUser() {
             if (!pendingDeleteUserName) return;
             const idx = registeredUsers.findIndex(u => u.name === pendingDeleteUserName);
             if (idx !== -1) {
                 const deletedName = pendingDeleteUserName;
+                const target = registeredUsers[idx];
+                try {
+                    if (target.uid) await firebaseDb.collection('user').doc(target.uid).delete();
+                } catch (err) {
+                    console.error('회원 삭제 실패:', err);
+                    showToast('회원 삭제 실패 [' + (err.code || 'error') + ']: ' + (err.message || err));
+                    return;
+                }
                 registeredUsers.splice(idx, 1);
                 saveToLocalStorage();
                 closeDeleteUserModal();
