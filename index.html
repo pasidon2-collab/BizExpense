@@ -1577,7 +1577,7 @@
                     <button onclick="switchTab('sub-leave')" id="nav-sub-leave" class="w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition border border-transparent hover:border-white/5">
                         <span class="flex items-center gap-2">
                             <i class="w-4 h-4 text-emerald-400" data-lucide="calendar-clock"></i>
-                            <span>대체휴무 (1.5배)</span>
+                            <span>대체휴무</span>
                             <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold font-mono text-cyan-200 hover:text-white bg-cyan-500/15 hover:bg-cyan-500/30 border border-cyan-500/30 hover:border-cyan-400 cursor-pointer ml-1.5 transition select-none shadow-sm"
                                   onmouseenter="showMenuGuideTooltip(event, 'sub_leave')"
                                   onmouseleave="hideMenuGuideTooltip()"
@@ -1710,11 +1710,11 @@
                     <div class="flex flex-col gap-1.5">
                         <button type="button" onclick="exportBackupDataJSON()" class="w-full py-1.5 bg-white/5 hover:bg-white/10 text-cyan-200 hover:text-white rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 transition border border-cyan-500/20">
                             <i class="w-3.5 h-3.5 text-cyan-400" data-lucide="hard-drive-download"></i>
-                            <span>백업 JSON 익스포트</span>
+                            <span>데이터 백업(JSON)</span>
                         </button>
                         <label class="w-full py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white rounded-lg text-[11px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition border border-cyan-500/20">
                             <i class="w-3.5 h-3.5 text-emerald-400" data-lucide="upload"></i>
-                            <span>데이터 복원 (JSON)</span>
+                            <span>데이터 복원(JSON)</span>
                             <input type="file" id="backup-file-input" accept=".json" onchange="importBackupDataJSON(event)" class="hidden">
                         </label>
                     </div>
@@ -2258,7 +2258,7 @@
                     <div>
                         <h2 class="text-lg font-bold text-slate-900 flex items-center space-x-2">
                             <i data-lucide="calendar-clock" class="w-5 h-5 text-emerald-600"></i>
-                            <span>주말·공휴일 출장 대체휴무(보상휴가) 관리</span>
+                            <span>주말·공휴일 출장 대체휴무 관리</span>
                         </h2>
                         <p class="text-xs text-slate-300 mt-1">휴일 근로 시 법정 1.5배 가산 대체휴무 자동 발생 및 사용 현황입니다.</p>
                     </div>
@@ -2594,7 +2594,7 @@
                                     <i data-lucide="wallet-cards" class="w-4 h-4"></i>
                                 </div>
                                 <div>
-                                    <h3 class="font-bold text-slate-800 text-sm">전사 미소진 대체휴무 부채(보상휴가) 현황</h3>
+                                    <h3 class="font-bold text-slate-800 text-sm">전사 미소진 대체휴무 부채 현황</h3>
                                     <p class="text-[11px] text-slate-500">근로기준법에 따른 전 임직원 잔여 대체휴무 적립 현황입니다.</p>
                                 </div>
                             </div>
@@ -2996,7 +2996,7 @@
                                     <input type="text" id="menu-guide-input-claims_list" placeholder="정산 내역 관리 안내 입력" class="w-full px-3 py-2 text-xs border border-slate-400/30 rounded-lg bg-slate-900/90 text-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400">
                                 </div>
                                 <div class="p-3 bg-slate-950/70 rounded-xl border border-cyan-500/20 space-y-1.5">
-                                    <label class="block text-xs font-bold text-emerald-300">🌴 대체휴무 (1.5배) 사용안내</label>
+                                    <label class="block text-xs font-bold text-emerald-300">🌴 대체휴무 사용안내</label>
                                     <input type="text" id="menu-guide-input-sub_leave" placeholder="대체휴무 안내 입력" class="w-full px-3 py-2 text-xs border border-emerald-400/30 rounded-lg bg-slate-900/90 text-slate-100 focus:outline-none focus:ring-2 focus:ring-emerald-400">
                                 </div>
                                 <div class="p-3 bg-slate-950/70 rounded-xl border border-cyan-500/20 space-y-1.5">
@@ -3216,7 +3216,7 @@
             <div class="flex justify-between items-center border-b border-slate-200 pb-3">
                 <h3 class="font-bold text-slate-900 text-sm flex items-center space-x-1.5">
                     <i data-lucide="plus-circle" class="w-4 h-4 text-blue-600"></i>
-                    <span>대체휴무(보상휴가) 수동 추가</span>
+                    <span>대체휴무 수동 추가</span>
                 </h3>
                 <button type="button" onclick="closeAddLeaveModal()" class="text-slate-400 hover:text-slate-600">
                     <i data-lucide="x" class="w-4 h-4"></i>
@@ -3265,7 +3265,7 @@
             <div class="flex justify-between items-center border-b border-slate-200 pb-3">
                 <h3 class="font-bold text-slate-900 text-sm flex items-center space-x-1.5">
                     <i data-lucide="calendar-check" class="w-4 h-4 text-emerald-600"></i>
-                    <span>대체휴무(보상휴가) 사용 등록</span>
+                    <span>대체휴무 사용 등록</span>
                 </h3>
                 <button type="button" onclick="closeCompUsageModal()" class="text-slate-400 hover:text-slate-600">
                     <i data-lucide="x" class="w-4 h-4"></i>
@@ -5786,7 +5786,7 @@
                 countEl.textContent = visibleClaims.length + '건';
             }
 
-            // 2. 대체휴무 (1.5배) 뱃지: 현재 로그인된 사용자의 실제 가용 잔여 일수
+            // 2. 대체휴무 뱃지: 현재 로그인된 사용자의 실제 가용 잔여 일수
             if (leaveEl) {
                 if (currentUser && currentUser.name) {
                     const userName = currentUser.name;
@@ -6461,12 +6461,12 @@
         const DEFAULT_MENU_GUIDES = {
             analytics: '전사 부서별·개인별 출장 지출 추이와 실시간 랭킹을 그래프로 종합 분석합니다.',
             users: '전사 회원 권한(직원/관리자) 승인 및 소속 부서를 등록·수정·관리합니다.',
-            leave: '주말·휴일 출장으로 적립된 1.5배 보상휴가(대체휴무) 현황과 부채를 총괄 관리합니다.',
+            leave: '주말·휴일 출장으로 적립된 대체휴무 현황과 부채를 총괄 관리합니다.',
             claims: '임직원이 제출한 모든 출장비 정산서를 검토하고 승인·반려·삭제 처리합니다.',
             notices: '전사 공지사항 및 팝업 안내를 등록·수정하여 모든 임직원에게 공지합니다.',
             new_claim: '출장 일정과 법인카드, 현금, 개인경비 지출 내역을 입력하여 새 정산서를 작성합니다.',
             claims_list: '내가 작성한 출장비 정산서 목록을 확인하고 수정하거나 인쇄 전표를 출력합니다.',
-            sub_leave: '출장으로 적립된 내 대체휴무(보상휴가) 잔여 일수를 확인하고 사용 신청을 관리합니다.',
+            sub_leave: '출장으로 적립된 내 대체휴무 잔여 일수를 확인하고 사용 신청을 관리합니다.',
             trip_map: '전국 및 해외 출장 목적지 위치와 방문 현황을 카카오 지도 상에서 시각적으로 확인합니다.'
         };
 
@@ -6478,7 +6478,7 @@
             notices: '공지사항 관리',
             new_claim: '정산서 작성',
             claims_list: '정산 내역 관리',
-            sub_leave: '대체휴무 (1.5배)',
+            sub_leave: '대체휴무',
             trip_map: '출장지 지도 현황'
         };
 
@@ -10503,7 +10503,7 @@
             editingLeaveId = null;
             const modalTitle = document.querySelector('#add-leave-modal h3 span');
             const submitButton = document.querySelector('#add-leave-modal button[type="submit"]');
-            if (modalTitle) modalTitle.textContent = '대체휴무(보상휴가) 수동 추가';
+            if (modalTitle) modalTitle.textContent = '대체휴무 수동 추가';
             if (submitButton) submitButton.textContent = '추가 확정';
             const selectUser = document.getElementById('add-leave-user-select');
             if (selectUser) {
@@ -10541,7 +10541,7 @@
             document.getElementById('add-leave-reason').value = String(record.reason || '').replace(/^\[수동추가\]\s*/, '');
             const modalTitle = document.querySelector('#add-leave-modal h3 span');
             const submitButton = document.querySelector('#add-leave-modal button[type="submit"]');
-            if (modalTitle) modalTitle.textContent = '대체휴무(보상휴가) 수정';
+            if (modalTitle) modalTitle.textContent = '대체휴무 수정';
             if (submitButton) submitButton.textContent = '수정 저장';
             const modal = document.getElementById('add-leave-modal');
             modal.classList.remove('hidden'); modal.style.display = 'flex';
